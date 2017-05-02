@@ -1,15 +1,25 @@
 from jinja2 import Environment, BaseLoader
 
 class Molecule(object):
-    def optimize(self, basis, theory):
+    def optimize(self, basis=None, theory=None):
         return CalculationResult()
 
+    def frequencies(self, basis=None, theory=None):
+        return FrequenciesCalculationResult()
+
+    def energy(self, basis=None, theory=None):
+        return CalculationResult()
+
+    def optimize_frequencies(self, basis=None, theory=None):
+        return FrequenciesCalculationResult()
+
+
 class Structure(object):
-    def show(self, style):
+    def show(self, style='ball-stick'):
         pass
 
-class VibrationalModes(object):
-    def show(self):
+class Frequencies(object):
+    def show(self, mode=None):
         pass
 
 class Orbitals(object):
@@ -22,15 +32,13 @@ class CalculationResult(object):
         return Structure()
 
     @property
-    def vibrational_modes(self):
-        return VibrationalModes()
-
-    @property
     def orbitals(self):
         return Orbitals()
 
+class FrequenciesCalculationResult(CalculationResult):
+    @property
     def frequencies(self):
-        return self
+        return Frequencies()
 
 class Reaction(object):
     def __init__(self, equation):
@@ -48,11 +56,11 @@ class Reaction(object):
     def products(self):
         return self._products
 
-    def free_energy(self, basis, theory):
+    def free_energy(self, basis=None, theory=None):
         return [1, 2, 3]
 
 
-def get_structure(identifier):
+def find_structure(identifier):
     return Molecule()
 
 def setup_reaction(equation):
