@@ -19,8 +19,16 @@ class Structure(object):
         pass
 
 class Frequencies(object):
-    def show(self, mode=None):
+    def show(self, animate_mode=None, animate_modes=False, spectrum=True):
         pass
+
+    @property
+    def table(self):
+        return {
+            'intensities': [],
+            'frequency': [],
+            'mode': []
+        }
 
 class Orbitals(object):
     def show(self):
