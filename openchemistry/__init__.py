@@ -31,7 +31,7 @@ class Frequencies(object):
         }
 
 class Orbitals(object):
-    def show(self):
+    def show(self, mo='homo'):
         pass
 
 class CalculationResult(object):
