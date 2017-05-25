@@ -2,3 +2,4 @@
 .project
 .pydevproject
 examples/.ipynb_checkpoints/
+openchemistrypy.egg-info/
