@@ -18,12 +18,11 @@ class Molecule(object):
     def __init__(self, _id):
         self._id = _id
 
-    def optimize(self, basis=None, theory=None):
-
+    def _fetch_calculation(self, type):
         parameters = {
-            'moleculeId': self._id
+            'moleculeId': self._id,
+            'calculationType': type
         }
-
 
         calculations = girder_client.get('calculations', parameters)
 
@@ -32,12 +31,18 @@ class Molecule(object):
             return None
 
         # For now just pick the first
-        calculation = calculations[0]
+        return calculations[0]
+
+
+    def optimize(self, basis=None, theory=None):
+        calculation = self._fetch_calculation('optimization')
 
         return CalculationResult(calculation['_id'])
 
     def frequencies(self, basis=None, theory=None):
-        return FrequenciesCalculationResult()
+        calculation = self._fetch_calculation('vibrational')
+
+        return FrequenciesCalculationResult(calculation['_id'])
 
     def energy(self, basis=None, theory=None):
         return CalculationResult()
@@ -61,16 +66,21 @@ class Structure(object):
             print(self._calculation_result._cjson)
 
 class Frequencies(object):
+
+    def __init__(self, calculation_result):
+        self._calculation_result = calculation_result
+
     def show(self, animate_mode=None, animate_modes=False, spectrum=True):
-        pass
+        try:
+            from jupyterlab_cjson import CJSON
+            return CJSON(self._calculation_result._cjson, structure=False)
+        except ImportError:
+            # Outside notebook print CJSON
+            print(self.table)
 
     @property
     def table(self):
-        return {
-            'intensities': [],
-            'frequency': [],
-            'mode': []
-        }
+        return self._calculation_result._vibrational_modes
 
 class Orbitals(object):
     def show(self, mo='homo'):
@@ -81,6 +91,7 @@ class CalculationResult(object):
     def __init__(self, _id):
         self._id = _id
         self._cjson_ = None
+        self._vibrational_modes_ = None
 
     @property
     def _cjson(self):
@@ -88,6 +99,13 @@ class CalculationResult(object):
             self._cjson_ = girder_client.get('calculations/%s/cjson' % self._id)
 
         return self._cjson_
+
+    @property
+    def _vibrational_modes(self):
+        if self._vibrational_modes_ is None:
+            self._vibrational_modes_ = girder_client.get('calculations/%s/vibrationalmodes' % self._id)
+
+        return self._vibrational_modes_
 
     @property
     def structure(self):
@@ -98,9 +116,12 @@ class CalculationResult(object):
         return Orbitals()
 
 class FrequenciesCalculationResult(CalculationResult):
+    def __init__(self, _id):
+        super(FrequenciesCalculationResult, self).__init__(_id)
+
     @property
     def frequencies(self):
-        return Frequencies()
+        return Frequencies(self)
 
 class Reaction(object):
     def __init__(self, equation):
