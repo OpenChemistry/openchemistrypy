@@ -2,10 +2,12 @@ from jinja2 import Environment, BaseLoader
 from girder_client import GirderClient, HttpError
 import re
 import os
+from jsonpath_rw import parse
 
 girder_host = os.environ['GIRDER_HOST']
 girder_port = os.environ['GIRDER_PORT']
 girder_api_key = os.environ['GIRDER_API_KEY']
+#app_base_url = os.environ['APP_BASE_URL']
 
 
 girder_client = GirderClient(host=girder_host, port=girder_port,
@@ -13,34 +15,37 @@ girder_client = GirderClient(host=girder_host, port=girder_port,
 
 girder_client.authenticate(apiKey=girder_api_key)
 
+# TODO Need to add basis and theory
+def _fetch_calculation(molecule_id, type=None):
+    parameters = {
+        'moleculeId': molecule_id,
+    }
+
+    if type is not None:
+        parameters['calculationType'] = type
+
+    calculations = girder_client.get('calculations', parameters)
+
+
+    if len(calculations) < 1:
+        # TODO Start the appropriate calculation :-)
+        return None
+
+    # For now just pick the first
+    return calculations[0]
+
 
 class Molecule(object):
     def __init__(self, _id):
         self._id = _id
 
-    def _fetch_calculation(self, type):
-        parameters = {
-            'moleculeId': self._id,
-            'calculationType': type
-        }
-
-        calculations = girder_client.get('calculations', parameters)
-
-        if len(calculations) < 1:
-            # TODO Start the appropriate calculation :-)
-            return None
-
-        # For now just pick the first
-        return calculations[0]
-
-
     def optimize(self, basis=None, theory=None):
-        calculation = self._fetch_calculation('optimization')
+        calculation = _fetch_calculation(self._id, type='optimization')
 
         return CalculationResult(calculation['_id'])
 
     def frequencies(self, basis=None, theory=None):
-        calculation = self._fetch_calculation('vibrational')
+        calculation = _fetch_calculation(self._id, type='vibrational')
 
         return FrequenciesCalculationResult(calculation['_id'])
 
@@ -64,6 +69,10 @@ class Structure(object):
         except ImportError:
             # Outside notebook print CJSON
             print(self._calculation_result._cjson)
+
+    def url(self, style='ball-stick'):
+        '%s/molecules/%s' % (app_base_url.rstrip('/'), self._calculation_result._id)
+
 
 class Frequencies(object):
 
@@ -139,16 +148,69 @@ class Reaction(object):
     def products(self):
         return self._products
 
+    @property
+    def equation(self):
+        return '%s => %s' % (' + '.join(self.reactants), ' + '.join(self.products))
+
+    def _fetch_free_energy(self, formula, basis=None, theory=None):
+        """
+        :return A tuple containing the total energy and zero point energy.
+        """
+
+        # First fetch the molecule using the formula
+        params = {
+            'formula': formula
+        }
+        mol = girder_client.get('molecules/search', parameters=params)
+
+        if len(mol) < 1:
+            raise Exception('No molecules found for formula \'%s\'' % formula)
+
+        # TODO Might we get more than one molecule with the same formula?
+
+        # Now fetch the calculations, TODO what types should we select
+        cjson = _fetch_calculation(mol[0]['_id'])
+
+        calcs = parse('properties.calculations').find(cjson)
+        if not calcs:
+            raise Exception('No calculations found for \'%s\'' % formula)
+
+        calcs = calcs[0].value
+
+        # TODO for now just select the first, which calculations should we
+        # favor? For now just search for the first that has both energies
+        selected_calc = None
+        for calc in calcs:
+            if 'totalEnergy' in calc and 'zeroPointEnergyCorrection' in calc:
+                selected_calc = calc
+                break
+
+        return (selected_calc['totalEnergy'], selected_calc['zeroPointEnergyCorrection'])
+
     def free_energy(self, basis=None, theory=None):
-        return [1, 2, 3]
+
+        def _sum(formulas):
+            energy = 0
+            for formula in formulas:
+                (total_energy, zero_point_energy) = self._fetch_free_energy(formula)
+                energy += total_energy['value'] + zero_point_energy['value']
+
+            return energy
+
+        reactants_energy_total = _sum(self.reactants)
+        products_energy_total = _sum(self.products)
+
+        free_energy = products_energy_total - reactants_energy_total
+        # Convert to kJ/mol
+        free_energy = free_energy * 2625.5
+
+        return free_energy
 
 _inchi_key_regex = re.compile("^([0-9A-Z\-]+)$")
 
 def _is_inchi_key(identifier):
     return len(identifier) == 27 and identifier[25] == '-' and \
         _inchi_key_regex.match(identifier)
-
-
 
 def find_structure(identifier):
 
@@ -173,3 +235,24 @@ def compose_equation(equation, **vars):
     equation = Environment(loader=BaseLoader()).from_string(equation)
 
     return equation.render(**vars)
+
+def show_free_energies(reactions, basis=None, theory=None):
+    free_energy_chart_data = {
+        'freeEnergy': [],
+        'reaction': []
+    }
+
+    for reaction in reactions:
+        equation = reaction.equation
+        free_energy = reaction.free_energy(basis, theory)
+
+        free_energy_chart_data['reaction'].append(equation)
+        free_energy_chart_data['freeEnergy'].append(free_energy)
+
+    try:
+        from jupyterlab_cjson import FreeEnergy
+
+        return FreeEnergy(free_energy_chart_data)
+    except ImportError:
+        # Outside notebook print the data
+        print(free_energy_chart_data)

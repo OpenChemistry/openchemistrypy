@@ -43,7 +43,8 @@ setup(
 
     install_requires=[
         'girder_client',
-        'jinja2'
+        'jinja2',
+        'jsonpath-rw'
     ],
 
     extras_require={
