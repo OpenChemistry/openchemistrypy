@@ -79,10 +79,11 @@ class Frequencies(object):
     def __init__(self, calculation_result):
         self._calculation_result = calculation_result
 
-    def show(self, animate_mode=None, animate_modes=False, spectrum=True):
+    def show(self, mode=None, animate_modes=False, spectrum=True):
         try:
             from jupyterlab_cjson import CJSON
-            return CJSON(self._calculation_result._cjson, structure=False)
+            return CJSON(self._calculation_result._cjson, structure=animate_modes,
+                         animate_mode=mode)
         except ImportError:
             # Outside notebook print CJSON
             print(self.table)
