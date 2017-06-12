@@ -93,8 +93,36 @@ class Frequencies(object):
         return self._calculation_result._vibrational_modes
 
 class Orbitals(object):
-    def show(self, mo='homo'):
-        pass
+
+    def __init__(self, calculation_result):
+        self._calculation_result = calculation_result
+
+    def show(self, mo='homo', iso=None):
+        try:
+            from jupyterlab_cjson import CJSON
+
+            cjson_copy = self._calculation_result._cjson.copy()
+            cjson_copy['cube'] = self._calculation_result._cube(mo)['cube']
+
+            extra = {}
+            if iso:
+                extra['isoSurfaces'] = [{
+                    'value': iso,
+                    'color': 'blue',
+                    'opacity': 0.9,
+                }, {
+                    'value': -iso,
+                    'color': 'red',
+                    'opacity': 0.9
+                }];
+
+            self._calculation_result._cube(mo)
+
+            return CJSON(cjson_copy, vibrational=False, **extra)
+        except ImportError:
+            # Outside notebook print CJSON
+            print(self._calculation_result._cjson)
+
 
 class CalculationResult(object):
 
@@ -117,13 +145,16 @@ class CalculationResult(object):
 
         return self._vibrational_modes_
 
+    def _cube(self, mo):
+        return girder_client.get('calculations/%s/cube/%s' % (self._id, mo))
+
     @property
     def structure(self):
         return Structure(self)
 
     @property
     def orbitals(self):
-        return Orbitals()
+        return Orbitals(self)
 
 class FrequenciesCalculationResult(CalculationResult):
     def __init__(self, _id):
