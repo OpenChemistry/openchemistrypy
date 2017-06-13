@@ -106,7 +106,7 @@ class Orbitals(object):
 
             extra = {}
             if iso:
-                extra['isoSurfaces'] = [{
+                extra['iso_surfaces'] = [{
                     'value': iso,
                     'color': 'blue',
                     'opacity': 0.9,
