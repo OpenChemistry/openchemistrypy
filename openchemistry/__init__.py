@@ -2,12 +2,13 @@ from jinja2 import Environment, BaseLoader
 from girder_client import GirderClient, HttpError
 import re
 import os
+import urllib.parse
 from jsonpath_rw import parse
 
 girder_host = os.environ['GIRDER_HOST']
 girder_port = os.environ['GIRDER_PORT']
 girder_api_key = os.environ['GIRDER_API_KEY']
-#app_base_url = os.environ['APP_BASE_URL']
+app_base_url = os.environ['APP_BASE_URL']
 
 
 girder_client = GirderClient(host=girder_host, port=girder_port,
@@ -71,7 +72,13 @@ class Structure(object):
             print(self._calculation_result._cjson)
 
     def url(self, style='ball-stick'):
-        '%s/molecules/%s' % (app_base_url.rstrip('/'), self._calculation_result._id)
+        url = '%s/calculations/%s' % (app_base_url.rstrip('/'), self._calculation_result._id)
+        try:
+            from IPython.display import Markdown
+            return Markdown('[%s](%s)' % (url, url))
+        except ImportError:
+            # Outside notebook just print the url
+            print(url)
 
 
 class Frequencies(object):
@@ -118,10 +125,36 @@ class Orbitals(object):
 
             self._calculation_result._cube(mo)
 
+            # Save parameter to use in url
+            self._last_mo = mo
+            self._last_iso = iso
+
             return CJSON(cjson_copy, vibrational=False, **extra)
         except ImportError:
             # Outside notebook print CJSON
             print(self._calculation_result._cjson)
+
+    def url(self):
+        url = '%s/calculations/%s' % (app_base_url.rstrip('/'), self._calculation_result._id)
+
+        params = { }
+
+        if self._last_mo is not None:
+            params['mo'] = self._last_mo
+
+        if self._last_iso is not None:
+            params['iso'] = self._last_iso
+
+        if params:
+            url = '%s?%s' % (url, urllib.parse.urlencode(params))
+
+        try:
+            from IPython.display import Markdown
+            return Markdown('[%s](%s)' % (url, url))
+        except ImportError:
+            # Outside notebook just print the url
+            print(url)
+
 
 
 class CalculationResult(object):
@@ -130,6 +163,7 @@ class CalculationResult(object):
         self._id = _id
         self._cjson_ = None
         self._vibrational_modes_ = None
+        self._orbitals = None
 
     @property
     def _cjson(self):
@@ -154,7 +188,10 @@ class CalculationResult(object):
 
     @property
     def orbitals(self):
-        return Orbitals(self)
+        if self._orbitals is None:
+            self._orbitals = Orbitals(self)
+
+        return self._orbitals
 
 class FrequenciesCalculationResult(CalculationResult):
     def __init__(self, _id):
