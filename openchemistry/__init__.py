@@ -129,7 +129,8 @@ class Orbitals(object):
             self._last_mo = mo
             self._last_iso = iso
 
-            return CJSON(cjson_copy, vibrational=False, **extra)
+            return CJSON(cjson_copy, vibrational=False, mo=mo,
+                         calculation_id=self._calculation_result._id, **extra)
         except ImportError:
             # Outside notebook print CJSON
             print(self._calculation_result._cjson)
