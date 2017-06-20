@@ -37,8 +37,9 @@ def _fetch_calculation(molecule_id, type=None):
 
 
 class Molecule(object):
-    def __init__(self, _id):
+    def __init__(self, _id, cjson=None):
         self._id = _id
+        self._cjson = cjson
 
     def optimize(self, basis=None, theory=None):
         calculation = _fetch_calculation(self._id, type='optimization')
@@ -56,17 +57,24 @@ class Molecule(object):
     def optimize_frequencies(self, basis=None, theory=None):
         return FrequenciesCalculationResult()
 
+    @property
+    def structure(self):
+        return Structure(cjson=self._cjson)
 
 class Structure(object):
 
-    def __init__(self, calculation_result):
+    def __init__(self, calculation_result=None, cjson=None):
         self._calculation_result = calculation_result
+        self._cjson = cjson
 
     def show(self, style='ball-stick'):
 
         try:
             from jupyterlab_cjson import CJSON
-            return CJSON(self._calculation_result._cjson, vibrational=False)
+            if self._calculation_result:
+                return CJSON(self._calculation_result._cjson, vibrational=False)
+            else:
+                return CJSON(self._cjson, vibrational=False)
         except ImportError:
             # Outside notebook print CJSON
             print(self._calculation_result._cjson)
@@ -283,21 +291,43 @@ def _is_inchi_key(identifier):
     return len(identifier) == 27 and identifier[25] == '-' and \
         _inchi_key_regex.match(identifier)
 
+def _find_using_cactus(identifier):
+    params = {
+        'cactus': identifier
+
+    }
+    molecule = girder_client.get('molecules/search', parameters=params)
+
+    # Just pick the first
+    if len(molecule) > 0:
+        molecule = molecule[0]
+        return Molecule(molecule['_id'], molecule['cjson'])
+    else:
+        return None
+
 def find_structure(identifier):
 
     # InChiKey?
     if _is_inchi_key(identifier):
         try:
             molecule = girder_client.get('molecules/inchikey/%s' % identifier)
+
+            return Molecule(molecule['_id'], molecule['cjson'])
         except HttpError as ex:
             if ex.status == 404:
-                return None
+                # Use cactus to try a lookup the structure
+                molecule = _find_using_cactus(identifier)
             else:
                 raise
     else:
-        raise Exception('Identifier not supported.')
+        molecule = _find_using_cactus(identifier)
 
-    return Molecule(molecule['_id'])
+
+    if not molecule:
+        raise Exception('No molecules found matching identifier: \'%s\'' % identifier)
+
+    return molecule
+
 
 def setup_reaction(equation):
     return Reaction(equation)
