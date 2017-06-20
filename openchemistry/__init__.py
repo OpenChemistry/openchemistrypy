@@ -117,7 +117,6 @@ class Orbitals(object):
             from jupyterlab_cjson import CJSON
 
             cjson_copy = self._calculation_result._cjson.copy()
-            print(cjson_copy['basisSet'])
             cjson_copy['cube'] = self._calculation_result._cube(mo)['cube']
 
             extra = {}
@@ -137,7 +136,7 @@ class Orbitals(object):
             # Save parameter to use in url
             self._last_mo = mo
             self._last_iso = iso
-            print(cjson_copy['basisSet'])
+
             return CJSON(cjson_copy, vibrational=False, mo=mo,
                          calculation_id=self._calculation_result._id, **extra)
         except ImportError:
