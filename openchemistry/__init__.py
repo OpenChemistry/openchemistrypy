@@ -3,12 +3,14 @@ from girder_client import GirderClient, HttpError
 import re
 import os
 import urllib.parse
+import inspect
 from jsonpath_rw import parse
 
 girder_host = os.environ['GIRDER_HOST']
 girder_port = os.environ['GIRDER_PORT']
 girder_api_key = os.environ['GIRDER_API_KEY']
 app_base_url = os.environ['APP_BASE_URL']
+cluster_id = os.environ.get('CLUSTER_ID')
 
 
 girder_client = GirderClient(host=girder_host, port=girder_port,
@@ -35,6 +37,13 @@ def _fetch_calculation(molecule_id, type=None):
     # For now just pick the first
     return calculations[0]
 
+def _submit_calculation():
+    if cluster_id is None:
+        raise Exception('Unable to submit calculation, no cluster configured.')
+
+    # Start the taskflow
+
+
 
 class Molecule(object):
     def __init__(self, _id, cjson=None):
@@ -43,6 +52,9 @@ class Molecule(object):
 
     def optimize(self, basis=None, theory=None):
         calculation = _fetch_calculation(self._id, type='optimization')
+
+        if calculation is None:
+            return PendingCalculationResultWrapper(CalculationResult())
 
         return CalculationResult(calculation['_id'])
 
@@ -164,11 +176,9 @@ class Orbitals(object):
             # Outside notebook just print the url
             print(url)
 
-
-
 class CalculationResult(object):
 
-    def __init__(self, _id):
+    def __init__(self, _id=None):
         self._id = _id
         self._cjson_ = None
         self._vibrational_modes_ = None
@@ -203,12 +213,38 @@ class CalculationResult(object):
         return self._orbitals
 
 class FrequenciesCalculationResult(CalculationResult):
-    def __init__(self, _id):
+    def __init__(self, _id=None):
         super(FrequenciesCalculationResult, self).__init__(_id)
 
     @property
     def frequencies(self):
         return Frequencies(self)
+
+class AttributeInterceptor(object):
+    def __init__(self, wrapped, value):
+        self._wrapped = wrapped
+        self._value = value
+
+    def __getattribute__(self, name):
+        # Use object's implementation to get attributes, otherwise
+        # we will get recursion
+        _wrapped = object.__getattribute__(self, '_wrapped')
+        _value = object.__getattribute__(self, '_value')
+        if hasattr(_wrapped, name):
+            attr = object.__getattribute__(_wrapped, name)
+            if inspect.ismethod(attr):
+                def pending(*args, **kwargs):
+                    return _value
+                return pending
+            else:
+                return AttributeInterceptor(attr, _value)
+        else:
+            return object.__getattribute__(_wrapped, name)
+
+class PendingCalculationResultWrapper(AttributeInterceptor):
+    def __init__(self, wrapped):
+        super(PendingCalculationResultWrapper, self).__init__(wrapped,
+            'This calculation is currently pending, please wait ...')
 
 class Reaction(object):
     def __init__(self, equation):
