@@ -18,20 +18,18 @@ girder_client = GirderClient(host=girder_host, port=girder_port,
 
 girder_client.authenticate(apiKey=girder_api_key)
 
-# TODO Need to add basis and theory
-def _fetch_calculation(molecule_id, type=None):
+# TODO Need to use basis and theory
+def _fetch_calculation(molecule_id, type_=None, theory=None, basis=None):
     parameters = {
         'moleculeId': molecule_id,
     }
 
-    if type is not None:
-        parameters['calculationType'] = type
+    if type_ is not None:
+        parameters['calculationType'] = type_
 
     calculations = girder_client.get('calculations', parameters)
 
-
     if len(calculations) < 1:
-        # TODO Start the appropriate calculation :-)
         return None
 
     # For now just pick the first
@@ -43,7 +41,22 @@ def _submit_calculation():
 
     # Start the taskflow
 
+def _create_pending_calculation(molecule_id, type, basis, theory):
+    body = {
+        'moleculeId': molecule_id,
+        'cjson': None, # This indicates  that the calculation is pending
+        'public': True,
+        'properties': {
+            'calculationTypes': [type],
+            'basis': basis,
+            'theory': theory,
+            'pending': True
+        }
+    }
 
+    calculation = girder_client.post('calculations', json=body)
+
+    return calculation
 
 class Molecule(object):
     def __init__(self, _id, cjson=None):
@@ -51,15 +64,27 @@ class Molecule(object):
         self._cjson = cjson
 
     def optimize(self, basis=None, theory=None):
-        calculation = _fetch_calculation(self._id, type='optimization')
+        type_ = 'optimization'
+        calculation = _fetch_calculation(self._id, type_, basis, theory)
 
         if calculation is None:
-            return PendingCalculationResultWrapper(CalculationResult())
+            calculation = _create_pending_calculation(self._id, type_, basis,
+                                                      theory)
 
-        return CalculationResult(calculation['_id'])
+        pending = parse('properties.pending').find(calculation)
+        if pending:
+            pending = pending[0].value
+
+        calculation = CalculationResult(calculation['_id'])
+
+        if pending:
+            calculation = PendingCalculationResultWrapper(calculation)
+
+        return calculation
 
     def frequencies(self, basis=None, theory=None):
-        calculation = _fetch_calculation(self._id, type='vibrational')
+        calculation = _fetch_calculation(self._id, type_='vibrational', basis=basis,
+                                         theory=theory)
 
         return FrequenciesCalculationResult(calculation['_id'])
 
