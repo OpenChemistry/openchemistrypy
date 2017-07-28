@@ -35,16 +35,46 @@ def _fetch_calculation(molecule_id, type_=None, theory=None, basis=None):
     # For now just pick the first
     return calculations[0]
 
-def _submit_calculation():
-    if cluster_id is None:
-        raise Exception('Unable to submit calculation, no cluster configured.')
+def _submit_calculation(cluster_id, pending_calculation_id):
+    #if cluster_id is None:
+    #   raise Exception('Unable to submit calculation, no cluster configured.')
 
+    # Create the taskflow
+    body = {
+        'taskFlowClass': 'openchemistry.nwchem.NWChemTaskFlow'
+    }
+
+    taskflow = girder_client.post('taskflows', json=body)
     # Start the taskflow
+    body = {
+        'cluster': {
+            '_id': '5978e76ef65710449f22b3d4' #cluster_id
+        },
+        'input': {
+            'calculation': {
+                '_id': pending_calculation_id
+            }
+        }
+    }
+    girder_client.put('taskflows/%s/start' % taskflow['_id'], json=body)
+
+    # Set the pending calculation id in the meta data
+    body = {
+        'meta.calculationId': pending_calculation_id
+    }
+    girder_client.patch('taskflows/%s' % taskflow['_id'], json=body)
+
+    return taskflow['_id']
+
+def _fetch_taskflow_status(taskflow_id):
+     r = girder_client.get('taskflows/%s/status' % taskflow_id)
+
+     return r['status']
 
 def _create_pending_calculation(molecule_id, type, basis, theory):
     body = {
         'moleculeId': molecule_id,
-        'cjson': None, # This indicates  that the calculation is pending
+        'cjson': None,
         'public': True,
         'properties': {
             'calculationTypes': [type],
@@ -66,19 +96,27 @@ class Molecule(object):
     def optimize(self, basis=None, theory=None):
         type_ = 'optimization'
         calculation = _fetch_calculation(self._id, type_, basis, theory)
+        taskflow_id = None
+        print("optimize")
 
         if calculation is None:
             calculation = _create_pending_calculation(self._id, type_, basis,
                                                       theory)
-
+            print('Submiting job')
+            taskflow_id = _submit_calculation(None, calculation['_id'])
+            # Patch calculation to include taskflow id
+            props = calculation['properties']
+            props['taskFlowId'] = taskflow_id
+            calculation = girder_client.put('calculations/%s/properties' % calculation['_id'], json=props)
+        print(calculation['_id'])
         pending = parse('properties.pending').find(calculation)
         if pending:
             pending = pending[0].value
 
-        calculation = CalculationResult(calculation['_id'])
+        calculation = CalculationResult(calculation['_id'], calculation['properties'])
 
         if pending:
-            calculation = PendingCalculationResultWrapper(calculation)
+            calculation = PendingCalculationResultWrapper(calculation, taskflow_id)
 
         return calculation
 
@@ -203,11 +241,12 @@ class Orbitals(object):
 
 class CalculationResult(object):
 
-    def __init__(self, _id=None):
+    def __init__(self, _id=None, properties=None):
         self._id = _id
         self._cjson_ = None
         self._vibrational_modes_ = None
         self._orbitals = None
+        self.properties = properties
 
     @property
     def _cjson(self):
@@ -246,16 +285,20 @@ class FrequenciesCalculationResult(CalculationResult):
         return Frequencies(self)
 
 class AttributeInterceptor(object):
-    def __init__(self, wrapped, value):
+    def __init__(self, wrapped, value, intercept_func=lambda : True):
         self._wrapped = wrapped
         self._value = value
+        self._intercept_func = intercept_func
+
 
     def __getattribute__(self, name):
         # Use object's implementation to get attributes, otherwise
         # we will get recursion
         _wrapped = object.__getattribute__(self, '_wrapped')
         _value = object.__getattribute__(self, '_value')
-        if hasattr(_wrapped, name):
+        intercept_func = object.__getattribute__(self, '_intercept_func')
+
+        if intercept_func() and hasattr(_wrapped, name):
             attr = object.__getattribute__(_wrapped, name)
             if inspect.ismethod(attr):
                 def pending(*args, **kwargs):
@@ -267,9 +310,31 @@ class AttributeInterceptor(object):
             return object.__getattribute__(_wrapped, name)
 
 class PendingCalculationResultWrapper(AttributeInterceptor):
-    def __init__(self, wrapped):
-        super(PendingCalculationResultWrapper, self).__init__(wrapped,
-            'This calculation is currently pending, please wait ...')
+    def __init__(self, calculation, taskflow_id=None):
+        try:
+            from jupyterlab_cjson import CalculationMonitor
+            if taskflow_id is None:
+                taskflow_id = calculation.properties['taskFlowId']
+
+            print('TaskFlow id %s' % taskflow_id)
+
+            table = CalculationMonitor({
+                'taskFlowIds': [taskflow_id],
+                'girderToken': girder_client.token
+            })
+        except ImportError:
+            # Outside notebook just print message
+            table = 'Pending calculations .... '
+
+        # Only intercept when the taskflow is not complete
+        def intercept():
+            return _fetch_taskflow_status(taskflow_id) != 'complete'
+
+        super(PendingCalculationResultWrapper, self).__init__(calculation,
+                                                              table, intercept)
+
+
+
 
 class Reaction(object):
     def __init__(self, equation):

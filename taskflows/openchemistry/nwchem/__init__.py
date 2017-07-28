@@ -103,9 +103,10 @@ def _create_job(task, input_file, input_folder):
     body = {
         'name': 'nwchem_run',
         'commands': [
-            "mpiexec -n %s nwchem %s" % (
-                10,
-                input_file['name'])
+            #'docker pull openchemistry/nwchem-json:latest',
+            #'docker run -v $(pwd):/data openchemistry/nwchem-json:latest %s' % (
+            #    input_file['name'])
+            'cp -r /home/test/597b90b6f6571037648d575a/* .'
         ],
         'input': [
             {
@@ -115,7 +116,7 @@ def _create_job(task, input_file, input_folder):
         ],
         'output': [],
         'params': {
-            'numberOfSlots': 10
+            'taskFlowId': task.taskflow.id
         }
     }
 
@@ -151,10 +152,10 @@ def submit(task, input_, cluster, run_folder, input_file, input_folder):
 
     monitor_job.apply_async((cluster, job), {'girder_token': girder_token,
                                              'monitor_interval': 30},
-                            link=postprocess.s(run_folder, cluster, job))
+                            link=postprocess.s(run_folder, input_, cluster, job))
 
 @cumulus.taskflow.task
-def postprocess(task, _, run_folder, cluster, job):
+def postprocess(task, _, run_folder, input_, cluster, job):
     task.taskflow.logger.info('Uploading results from cluster')
 
     client = create_girder_client(
@@ -173,4 +174,21 @@ def postprocess(task, _, run_folder, cluster, job):
 
     task.taskflow.logger.info('Upload job output complete.')
 
+    input_file_name = task.taskflow.get_metadata('inputFileName')
+    input_file_name
     # Call to ingest the files
+    for item in client.listItem(output_folder['_id']):
+        if item['name'].endswith('.json'):
+            files = list(client.listFile(item['_id']))
+            if len(files) != 1:
+                raise Exception('Expecting a single file under item, found: %s' + len(files))
+
+            json_output_file_id = files[0]['_id']
+            # Now call endpoint to ingest result
+            body = {
+                'calculationId': input_['calculation']['_id'],
+                'fileId': json_output_file_id,
+                'public': True
+            }
+
+            client.post('molecules', json=body)
