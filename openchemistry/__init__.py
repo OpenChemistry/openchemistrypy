@@ -48,7 +48,7 @@ def _submit_calculation(cluster_id, pending_calculation_id):
     # Start the taskflow
     body = {
         'cluster': {
-            '_id': '5978e76ef65710449f22b3d4' #cluster_id
+            '_id': '598892b8f657101d53abc19e'#'5978e76ef65710449f22b3d4' #cluster_id
         },
         'input': {
             'calculation': {

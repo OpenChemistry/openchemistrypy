@@ -13,6 +13,9 @@ from jsonpath_rw import parse
 import os
 import datetime
 import json
+from io import BytesIO
+import jinja2
+import tempfile
 
 def _jsonpath(path, json):
     values = [x.value for x in parse(path).find(json)]
@@ -80,19 +83,58 @@ def setup_input(task, input_, cluster):
     client = create_girder_client(
         task.taskflow.girder_api_url, task.taskflow.girder_token)
 
+    calculation_id = parse('calculation._id').find(input_)
+    if not calculation_id:
+        raise Exception('Unable to extract calculation id.')
+    calculation_id = calculation_id[0].value
+
+    # Fetch the geometry
+    calculation = client.get('calculations/%s' % calculation_id)
+    molecule_id = calculation['moleculeId']
+    r = client.get('molecules/%s/xyz' % molecule_id, jsonResp=False)
+    xyz = r.content
+    print(xyz)
     oc_folder = _get_oc_folder(client)
     run_folder = client.createFolder(oc_folder['_id'],
                                      datetime.datetime.now().strftime("%Y_%m_%d-%H_%M_%S"))
     input_folder = client.createFolder(run_folder['_id'],
                                        'input')
 
+    # Generate input file
+    params = {
+        # For now we always need an energy calculation first
+        'energy': True
+    }
+    basis = parse('properties.basis').find(calculation)
+    if basis:
+        params['basis'] = basis[0].value
 
-    input_file_path = os.path.join(os.path.dirname(__file__), 'ch3br.nw')
-    size = os.path.getsize(input_file_path)
-    name = 'oc.nw'
-    with open(input_file_path) as fp:
+    theory = parse('properties.theory').find(calculation)
+    if theory:
+        params['theory'] = theory[0].value.upper()
+
+    theory = parse('properties.theory').find(calculation)
+
+
+
+
+
+
+    template_path = os.path.dirname(__file__)
+    jinja2_env = jinja2.Environment(loader=jinja2.FileSystemLoader(template_path),
+                             trim_blocks=True)
+    with tempfile.TemporaryFile() as fp:
+        jinja2_env.get_template('oc.nw.j2').stream(**params).dump(fp, encoding='utf8')
+        # Get the size of the file
+        size = fp.seek(0, 2)
+        fp.seek(0)
+        name = 'oc.nw'
         input_file = client.uploadFile(input_folder['_id'],  fp, name, size,
                                        parentType='folder')
+    # Upload the xyz file
+    size = len(xyz)
+    client.uploadFile(input_folder['_id'], BytesIO(xyz), 'geometry.xyz', size,
+                      parentType='folder')
 
     submit.delay(input_, cluster, run_folder, input_file, input_folder)
 
@@ -103,10 +145,10 @@ def _create_job(task, input_file, input_folder):
     body = {
         'name': 'nwchem_run',
         'commands': [
-            #'docker pull openchemistry/nwchem-json:latest',
-            #'docker run -v $(pwd):/data openchemistry/nwchem-json:latest %s' % (
-            #    input_file['name'])
-            'cp -r /home/test/597b90b6f6571037648d575a/* .'
+            'docker pull openchemistry/nwchem-json:latest',
+            'docker run -v $(pwd):/data openchemistry/nwchem-json:latest %s' % (
+                input_file['name'])
+            #'cp -r /home/test/597b90b6f6571037648d575a/* .'
         ],
         'input': [
             {
