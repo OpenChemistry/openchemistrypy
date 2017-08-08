@@ -320,7 +320,7 @@ class AttributeInterceptor(object):
                     return _value
                 return pending
             else:
-                return AttributeInterceptor(attr, _value)
+                return AttributeInterceptor(attr, _value, intercept_func)
         else:
             return object.__getattribute__(_wrapped, name)
 
@@ -330,8 +330,6 @@ class PendingCalculationResultWrapper(AttributeInterceptor):
             from jupyterlab_cjson import CalculationMonitor
             if taskflow_id is None:
                 taskflow_id = calculation.properties['taskFlowId']
-
-            print('TaskFlow id %s' % taskflow_id)
 
             table = CalculationMonitor({
                 'taskFlowIds': [taskflow_id],
