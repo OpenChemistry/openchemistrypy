@@ -96,7 +96,7 @@ def setup_input(task, input_, cluster):
     print(xyz)
     oc_folder = _get_oc_folder(client)
     run_folder = client.createFolder(oc_folder['_id'],
-                                     datetime.datetime.now().strftime("%Y_%m_%d-%H_%M_%S"))
+                                     datetime.datetime.now().strftime("%Y_%m_%d-%H_%M_%f"))
     input_folder = client.createFolder(run_folder['_id'],
                                        'input')
 
@@ -195,7 +195,7 @@ def submit(task, input_, cluster, run_folder, input_file, input_folder):
         traceback.print_exc()
 
     monitor_job.apply_async((cluster, job), {'girder_token': girder_token,
-                                             'monitor_interval': 30},
+                                             'monitor_interval': 10},
                             link=postprocess.s(run_folder, input_, cluster, job))
 
 @cumulus.taskflow.task

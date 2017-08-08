@@ -386,9 +386,18 @@ class Reaction(object):
         # TODO Might we get more than one molecule with the same formula?
 
         # Now fetch the calculations, TODO what types should we select
-        cjson = _fetch_calculation(mol[0]['_id'])
+        calculation = _fetch_or_submit_calculation(mol[0]['_id'], 'vibrational', basis, theory)
 
-        calcs = parse('properties.calculations').find(cjson)
+        pending = parse('properties.pending').find(calculation)
+        if pending:
+            pending = pending[0].value
+
+        if pending:
+            taskflow_id = parse('properties.taskFlowId').find(calculation)
+            taskflow_id = taskflow_id[0].value
+            return CalculationResult(calculation['_id'], calculation['properties'])
+
+        calcs = parse('properties.calculations').find(calculation)
         if not calcs:
             raise Exception('No calculations found for \'%s\'' % formula)
 
@@ -407,15 +416,34 @@ class Reaction(object):
     def free_energy(self, basis=None, theory=None):
 
         def _sum(formulas):
+            pending_calculations = []
             energy = 0
             for formula in formulas:
-                (total_energy, zero_point_energy) = self._fetch_free_energy(formula)
-                energy += total_energy['value'] + zero_point_energy['value']
+                free_energy = self._fetch_free_energy(formula, basis, theory)
 
-            return energy
+                if isinstance(free_energy, CalculationResult):
+                    pending_calculations.append(free_energy)
+                else:
+                    (total_energy, zero_point_energy) = free_energy
+                    energy += total_energy['value'] + zero_point_energy['value']
+
+            if len(pending_calculations) == 0:
+                return energy
+            else:
+                return pending_calculations
 
         reactants_energy_total = _sum(self.reactants)
         products_energy_total = _sum(self.products)
+
+        if isinstance(reactants_energy_total, list) or isinstance(products_energy_total, list):
+            pending_calculations = []
+            if isinstance(reactants_energy_total, list):
+                pending_calculations += reactants_energy_total
+
+            if isinstance(products_energy_total, list):
+                pending_calculations += products_energy_total
+
+            return pending_calculations
 
         free_energy = products_energy_total - reactants_energy_total
         # Convert to kJ/mol
@@ -481,12 +509,33 @@ def show_free_energies(reactions, basis=None, theory=None):
         'reaction': []
     }
 
+    pending_calculations = []
     for reaction in reactions:
         equation = reaction.equation
         free_energy = reaction.free_energy(basis, theory)
 
+        if isinstance(free_energy, list):
+            pending_calculations += free_energy
+
         free_energy_chart_data['reaction'].append(equation)
         free_energy_chart_data['freeEnergy'].append(free_energy)
+
+    if pending_calculations:
+        taskflow_ids = [ cal.properties['taskFlowId'] for cal in pending_calculations]
+        # Remove duplicates
+        taskflow_ids = list(set(taskflow_ids))
+
+        try:
+            from jupyterlab_cjson import CalculationMonitor
+            table = CalculationMonitor({
+                    'taskFlowIds': taskflow_ids,
+                    'girderToken': girder_client.token
+                })
+        except ImportError:
+            # Outside notebook just print message
+            table = 'Pending calculations .... '
+
+        return table;
 
     try:
         from jupyterlab_cjson import FreeEnergy
