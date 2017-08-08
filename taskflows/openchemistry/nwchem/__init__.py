@@ -105,6 +105,13 @@ def setup_input(task, input_, cluster):
         # For now we always need an energy calculation first
         'energy': True
     }
+    calculation_types = parse('properties.calculationTypes').find(calculation)
+    if calculation_types:
+        calculation_types = calculation_types[0].value
+
+    for calculation_type in calculation_types:
+        params[calculation_type] = True
+
     basis = parse('properties.basis').find(calculation)
     if basis:
         params['basis'] = basis[0].value
@@ -114,11 +121,6 @@ def setup_input(task, input_, cluster):
         params['theory'] = theory[0].value.upper()
 
     theory = parse('properties.theory').find(calculation)
-
-
-
-
-
 
     template_path = os.path.dirname(__file__)
     jinja2_env = jinja2.Environment(loader=jinja2.FileSystemLoader(template_path),
