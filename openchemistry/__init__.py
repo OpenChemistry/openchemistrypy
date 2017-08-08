@@ -103,15 +103,8 @@ def _fetch_or_submit_calculation(molecule_id, type_, basis, theory):
         props = calculation['properties']
         props['taskFlowId'] = taskflow_id
         calculation = girder_client.put('calculations/%s/properties' % calculation['_id'], json=props)
+
     print(calculation['_id'])
-    pending = parse('properties.pending').find(calculation)
-    if pending:
-        pending = pending[0].value
-
-    calculation = CalculationResult(calculation['_id'], calculation['properties'])
-
-    if pending:
-        calculation = PendingCalculationResultWrapper(calculation, taskflow_id)
 
     return calculation
 
@@ -122,13 +115,36 @@ class Molecule(object):
 
     def optimize(self, basis=None, theory=None):
         type_ = 'optimization'
-        return _fetch_or_submit_calculation(self._id, type_, basis, theory)
+        calculation =  _fetch_or_submit_calculation(self._id, type_, basis, theory)
+        pending = parse('properties.pending').find(calculation)
+        if pending:
+            pending = pending[0].value
+
+        taskflow_id = parse('properties.taskFlowId').find(calculation)
+        taskflow_id = taskflow_id[0].value
+        calculation = CalculationResult(calculation['_id'], calculation['properties'])
+
+        if pending:
+            calculation = PendingCalculationResultWrapper(calculation, taskflow_id)
+
+        return calculation
+
 
     def frequencies(self, basis=None, theory=None):
-        calculation = _fetch_calculation(self._id, type_='vibrational', basis=basis,
-                                         theory=theory)
+        type_ = 'vibrational'
+        calculation = _fetch_or_submit_calculation(self._id, type_, basis, theory)
+        pending = parse('properties.pending').find(calculation)
+        if pending:
+            pending = pending[0].value
 
-        return FrequenciesCalculationResult(calculation['_id'])
+        taskflow_id = parse('properties.taskFlowId').find(calculation)
+        taskflow_id = taskflow_id[0].value
+        calculation = FrequenciesCalculationResult(calculation['_id'], calculation['properties'])
+
+        if pending:
+            calculation = PendingCalculationResultWrapper(calculation, taskflow_id)
+
+        return calculation
 
     def energy(self, basis=None, theory=None):
         return CalculationResult()
@@ -281,8 +297,8 @@ class CalculationResult(object):
         return self._orbitals
 
 class FrequenciesCalculationResult(CalculationResult):
-    def __init__(self, _id=None):
-        super(FrequenciesCalculationResult, self).__init__(_id)
+    def __init__(self, _id=None, properties=None):
+        super(FrequenciesCalculationResult, self).__init__(_id, properties)
 
     @property
     def frequencies(self):
