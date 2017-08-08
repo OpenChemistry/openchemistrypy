@@ -12,7 +12,6 @@ girder_api_key = os.environ['GIRDER_API_KEY']
 app_base_url = os.environ['APP_BASE_URL']
 cluster_id = os.environ.get('CLUSTER_ID')
 
-
 girder_client = GirderClient(host=girder_host, port=girder_port,
                               scheme='http')
 
@@ -92,19 +91,15 @@ def _fetch_or_submit_calculation(molecule_id, type_, basis, theory):
     global cluster_id
     calculation = _fetch_calculation(molecule_id, type_, basis, theory)
     taskflow_id = None
-    print("optimize")
 
     if calculation is None:
         calculation = _create_pending_calculation(molecule_id, type_, basis,
                                                   theory)
-        print('Submiting job')
         taskflow_id = _submit_calculation(cluster_id, calculation['_id'])
         # Patch calculation to include taskflow id
         props = calculation['properties']
         props['taskFlowId'] = taskflow_id
         calculation = girder_client.put('calculations/%s/properties' % calculation['_id'], json=props)
-
-    print(calculation['_id'])
 
     return calculation
 
