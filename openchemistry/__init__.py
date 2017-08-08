@@ -36,8 +36,8 @@ def _fetch_calculation(molecule_id, type_=None, theory=None, basis=None):
     return calculations[0]
 
 def _submit_calculation(cluster_id, pending_calculation_id):
-    #if cluster_id is None:
-    #   raise Exception('Unable to submit calculation, no cluster configured.')
+    if cluster_id is None:
+        raise Exception('Unable to submit calculation, no cluster configured.')
 
     # Create the taskflow
     body = {
@@ -48,7 +48,7 @@ def _submit_calculation(cluster_id, pending_calculation_id):
     # Start the taskflow
     body = {
         'cluster': {
-            '_id': '598892b8f657101d53abc19e'#'5978e76ef65710449f22b3d4' #cluster_id
+            '_id': cluster_id
         },
         'input': {
             'calculation': {
@@ -88,6 +88,33 @@ def _create_pending_calculation(molecule_id, type, basis, theory):
 
     return calculation
 
+def _fetch_or_submit_calculation(molecule_id, type_, basis, theory):
+    global cluster_id
+    calculation = _fetch_calculation(molecule_id, type_, basis, theory)
+    taskflow_id = None
+    print("optimize")
+
+    if calculation is None:
+        calculation = _create_pending_calculation(molecule_id, type_, basis,
+                                                  theory)
+        print('Submiting job')
+        taskflow_id = _submit_calculation(cluster_id, calculation['_id'])
+        # Patch calculation to include taskflow id
+        props = calculation['properties']
+        props['taskFlowId'] = taskflow_id
+        calculation = girder_client.put('calculations/%s/properties' % calculation['_id'], json=props)
+    print(calculation['_id'])
+    pending = parse('properties.pending').find(calculation)
+    if pending:
+        pending = pending[0].value
+
+    calculation = CalculationResult(calculation['_id'], calculation['properties'])
+
+    if pending:
+        calculation = PendingCalculationResultWrapper(calculation, taskflow_id)
+
+    return calculation
+
 class Molecule(object):
     def __init__(self, _id, cjson=None):
         self._id = _id
@@ -95,30 +122,7 @@ class Molecule(object):
 
     def optimize(self, basis=None, theory=None):
         type_ = 'optimization'
-        calculation = _fetch_calculation(self._id, type_, basis, theory)
-        taskflow_id = None
-        print("optimize")
-
-        if calculation is None:
-            calculation = _create_pending_calculation(self._id, type_, basis,
-                                                      theory)
-            print('Submiting job')
-            taskflow_id = _submit_calculation(None, calculation['_id'])
-            # Patch calculation to include taskflow id
-            props = calculation['properties']
-            props['taskFlowId'] = taskflow_id
-            calculation = girder_client.put('calculations/%s/properties' % calculation['_id'], json=props)
-        print(calculation['_id'])
-        pending = parse('properties.pending').find(calculation)
-        if pending:
-            pending = pending[0].value
-
-        calculation = CalculationResult(calculation['_id'], calculation['properties'])
-
-        if pending:
-            calculation = PendingCalculationResultWrapper(calculation, taskflow_id)
-
-        return calculation
+        return _fetch_or_submit_calculation(self._id, type_, basis, theory)
 
     def frequencies(self, basis=None, theory=None):
         calculation = _fetch_calculation(self._id, type_='vibrational', basis=basis,
