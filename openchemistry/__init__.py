@@ -331,8 +331,6 @@ class PendingCalculationResultWrapper(AttributeInterceptor):
             if taskflow_id is None:
                 taskflow_id = calculation.properties['taskFlowId']
 
-            print('TaskFlow id %s' % taskflow_id)
-
             table = CalculationMonitor({
                 'taskFlowIds': [taskflow_id],
                 'girderToken': girder_client.token
