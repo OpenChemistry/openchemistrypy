@@ -6,16 +6,17 @@ import urllib.parse
 import inspect
 from jsonpath_rw import parse
 
-girder_host = os.environ['GIRDER_HOST']
-girder_port = os.environ['GIRDER_PORT']
-girder_api_key = os.environ['GIRDER_API_KEY']
-app_base_url = os.environ['APP_BASE_URL']
+girder_host = os.environ.get('GIRDER_HOST')
+girder_port = os.environ.get('GIRDER_PORT')
+girder_api_key = os.environ.get('GIRDER_API_KEY')
+app_base_url = os.environ.get('APP_BASE_URL')
 cluster_id = os.environ.get('CLUSTER_ID')
 
-girder_client = GirderClient(host=girder_host, port=girder_port,
-                              scheme='http')
-
-girder_client.authenticate(apiKey=girder_api_key)
+if girder_host:
+    girder_client = GirderClient(host=girder_host, port=girder_port,
+                                 scheme='http')
+ 
+    girder_client.authenticate(apiKey=girder_api_key)
 
 # TODO Need to use basis and theory
 def _fetch_calculation(molecule_id, type_=None, theory=None, basis=None):
