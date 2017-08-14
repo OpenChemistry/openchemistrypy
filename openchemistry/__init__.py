@@ -320,7 +320,7 @@ class AttributeInterceptor(object):
                     return _value
                 return pending
             else:
-                return AttributeInterceptor(attr, _value)
+                return AttributeInterceptor(attr, _value, intercept_func)
         else:
             return object.__getattribute__(_wrapped, name)
 
