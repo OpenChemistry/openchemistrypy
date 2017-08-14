@@ -1,0 +1,48 @@
+start molecule
+echo
+
+Memory heap 50 stack 1500 global 500 mb
+
+charge {{charge|default(0)}}
+
+geometry noautoz noautosym units angstrom
+ load geometry.xyz
+end
+
+basis spherical
+ * library {{basis|default('Def2-TZVP')}}
+end
+
+{% if theory == 'RHF' %}
+{% set task = 'scf' %}
+{% elif theory == 'B3LYP' %}
+{% set task = 'dft' %}
+dft
+  xc b3lyp
+  mult {{multiplicity|default(1)}}
+end
+{% elif theory == 'MP2' %}
+{% set task = 'mp2' %}
+mp2
+  # Exclude core electrons from MP2 treatment:\n"
+  freeze atomic
+end
+{% elif theory == 'CCSD' %}
+{% set task = 'ccsd' %}
+ccsd
+  # Exclude core electrons from coupled cluster perturbations:\n"
+  freeze atomic\n"
+end
+{% endif %}
+
+set movecs:tanalyze 0.001
+
+{% if energy is defined  %}
+task {{task}} energy
+{% endif %}
+{% if optimization is defined  %}
+task {{task}} optimize
+{% endif %}
+{% if vibrational is defined  %}
+task {{task}} freq
+{% endif %}
