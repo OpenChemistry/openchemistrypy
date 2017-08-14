@@ -96,7 +96,7 @@ def setup_input(task, input_, cluster):
     print(xyz)
     oc_folder = _get_oc_folder(client)
     run_folder = client.createFolder(oc_folder['_id'],
-                                     datetime.datetime.now().strftime("%Y_%m_%d-%H_%M_%S"))
+                                     datetime.datetime.now().strftime("%Y_%m_%d-%H_%M_%f"))
     input_folder = client.createFolder(run_folder['_id'],
                                        'input')
 
