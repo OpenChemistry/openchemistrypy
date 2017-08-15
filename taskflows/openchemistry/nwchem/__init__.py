@@ -88,12 +88,35 @@ def setup_input(task, input_, cluster):
         raise Exception('Unable to extract calculation id.')
     calculation_id = calculation_id[0].value
 
-    # Fetch the geometry
+    # Fetch the "best" geometry we currently have
     calculation = client.get('calculations/%s' % calculation_id)
     molecule_id = calculation['moleculeId']
-    r = client.get('molecules/%s/xyz' % molecule_id, jsonResp=False)
-    xyz = r.content
-    print(xyz)
+
+    # Fetch our best geometry
+    params = {
+        'moleculeId': molecule_id,
+        'sortByTheory': True,
+        'limit': 1,
+        'calculationType': 'optimization',
+        'pending': False
+    }
+
+    calculations = client.get('calculations', parameters=params)
+
+    # If we have not calculations then just use the geometry stored in molecules
+    if len(calculations) != 1:
+        r = client.get('molecules/%s/xyz' % molecule_id, jsonResp=False)
+        xyz = r.content
+        # As we might be using an unoptimized structure add the optimize step
+        if 'optimization' not in calculation['properties']['calculationTypes']:
+            calculation['properties']['calculationTypes'].append('optimization')
+    # Fetch xyz for best geometry
+    else:
+        print('using existing structure')
+        best_calc = calculations[0]
+        r = client.get('calculations/%s/xyz' % best_calc['_id'], jsonResp=False)
+        xyz = r.content
+
     oc_folder = _get_oc_folder(client)
     run_folder = client.createFolder(oc_folder['_id'],
                                      datetime.datetime.now().strftime("%Y_%m_%d-%H_%M_%f"))
@@ -101,10 +124,7 @@ def setup_input(task, input_, cluster):
                                        'input')
 
     # Generate input file
-    params = {
-        # For now we always need an energy calculation first
-        'energy': True
-    }
+    params = {}
     calculation_types = parse('properties.calculationTypes').find(calculation)
     if calculation_types:
         calculation_types = calculation_types[0].value

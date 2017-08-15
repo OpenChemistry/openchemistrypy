@@ -21,6 +21,7 @@ if girder_host:
 def _fetch_calculation(molecule_id, type_=None, basis=None, theory=None, functional=None):
     parameters = {
         'moleculeId': molecule_id,
+	'sortByTheory': True
     }
 
     if type_ is not None:
@@ -40,7 +41,7 @@ def _fetch_calculation(molecule_id, type_=None, basis=None, theory=None, functio
     if len(calculations) < 1:
         return None
 
-    # For now just pick the first
+    # Pick the "best"
     return calculations[0]
 
 def _submit_calculation(cluster_id, pending_calculation_id):
@@ -368,9 +369,6 @@ class PendingCalculationResultWrapper(AttributeInterceptor):
 
         super(PendingCalculationResultWrapper, self).__init__(calculation,
                                                               table, intercept)
-
-
-
 
 class Reaction(object):
     def __init__(self, equation):
