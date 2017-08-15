@@ -112,15 +112,17 @@ def setup_input(task, input_, cluster):
     for calculation_type in calculation_types:
         params[calculation_type] = True
 
-    basis = parse('properties.basis').find(calculation)
+    basis = parse('properties.basisSet.name').find(calculation)
     if basis:
         params['basis'] = basis[0].value
 
-    theory = parse('properties.theory').find(calculation)
-    if theory:
-        params['theory'] = theory[0].value.upper()
+    functional = parse('properties.functional').find(calculation)
+    if functional:
+        params['functional'] = functional[0].value.lower()
 
     theory = parse('properties.theory').find(calculation)
+    if theory:
+        params['theory'] = theory[0].value.lower()
 
     template_path = os.path.dirname(__file__)
     jinja2_env = jinja2.Environment(loader=jinja2.FileSystemLoader(template_path),

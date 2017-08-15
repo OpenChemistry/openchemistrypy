@@ -18,13 +18,22 @@ if girder_host:
     girder_client.authenticate(apiKey=girder_api_key)
 
 # TODO Need to use basis and theory
-def _fetch_calculation(molecule_id, type_=None, theory=None, basis=None):
+def _fetch_calculation(molecule_id, type_=None, basis=None, theory=None, functional=None):
     parameters = {
         'moleculeId': molecule_id,
     }
 
     if type_ is not None:
         parameters['calculationType'] = type_
+
+    if functional is not None:
+        parameters['functional'] = functional
+
+    if theory is not None:
+        parameters['theory'] = theory
+
+    if basis is not None:
+        parameters['basis'] = basis
 
     calculations = girder_client.get('calculations', parameters)
 
@@ -70,31 +79,44 @@ def _fetch_taskflow_status(taskflow_id):
 
      return r['status']
 
-def _create_pending_calculation(molecule_id, type, basis, theory):
+def _create_pending_calculation(molecule_id, type_, basis, theory, functional=None):
+    print(type_)
+    if not isinstance(type_, list):
+        type_ = [type_]
+
     body = {
         'moleculeId': molecule_id,
         'cjson': None,
         'public': True,
         'properties': {
-            'calculationTypes': [type],
-            'basis': basis,
-            'theory': theory,
+            'calculationTypes': type_,
+            'basisSet': {
+                'name': basis.lower()
+            },
+            'theory': theory.lower(),
             'pending': True
         }
     }
+
+    if functional is not None:
+        body['properties']['functional'] = functional.lower()
 
     calculation = girder_client.post('calculations', json=body)
 
     return calculation
 
-def _fetch_or_submit_calculation(molecule_id, type_, basis, theory):
+def _fetch_or_submit_calculation(molecule_id, type_, basis, theory, functional=None):
     global cluster_id
-    calculation = _fetch_calculation(molecule_id, type_, basis, theory)
+    # If a functional has been provided default theory to dft
+    if theory is None and functional is not None:
+        theory = 'dft'
+
+    calculation = _fetch_calculation(molecule_id, type_, basis, theory, functional)
     taskflow_id = None
 
     if calculation is None:
         calculation = _create_pending_calculation(molecule_id, type_, basis,
-                                                  theory)
+                                                  theory, functional)
         taskflow_id = _submit_calculation(cluster_id, calculation['_id'])
         # Patch calculation to include taskflow id
         props = calculation['properties']
@@ -108,9 +130,10 @@ class Molecule(object):
         self._id = _id
         self._cjson = cjson
 
-    def optimize(self, basis=None, theory=None):
+    def optimize(self, basis=None, theory=None, functional=None):
         type_ = 'optimization'
-        calculation =  _fetch_or_submit_calculation(self._id, type_, basis, theory)
+        calculation =  _fetch_or_submit_calculation(self._id, type_, basis, theory,
+                                                    functional)
         pending = parse('properties.pending').find(calculation)
         if pending:
             pending = pending[0].value
@@ -125,9 +148,9 @@ class Molecule(object):
         return calculation
 
 
-    def frequencies(self, basis=None, theory=None):
+    def frequencies(self, basis=None, theory=None, functional=None):
         type_ = 'vibrational'
-        calculation = _fetch_or_submit_calculation(self._id, type_, basis, theory)
+        calculation = _fetch_or_submit_calculation(self._id, type_, basis, theory, functional)
         pending = parse('properties.pending').find(calculation)
         if pending:
             pending = pending[0].value
@@ -141,10 +164,10 @@ class Molecule(object):
 
         return calculation
 
-    def energy(self, basis=None, theory=None):
+    def energy(self, basis=None, theory=None, functional=None):
         return CalculationResult()
 
-    def optimize_frequencies(self, basis=None, theory=None):
+    def optimize_frequencies(self, basis=None, theory=None, functional=None):
         return FrequenciesCalculationResult()
 
     @property
@@ -369,7 +392,7 @@ class Reaction(object):
     def equation(self):
         return '%s => %s' % (' + '.join(self.reactants), ' + '.join(self.products))
 
-    def _fetch_free_energy(self, formula, basis=None, theory=None):
+    def _fetch_free_energy(self, formula, basis=None, theory=None, functional=None):
         """
         :return A tuple containing the total energy and zero point energy.
         """
@@ -386,7 +409,9 @@ class Reaction(object):
         # TODO Might we get more than one molecule with the same formula?
 
         # Now fetch the calculations, TODO what types should we select
-        calculation = _fetch_or_submit_calculation(mol[0]['_id'], 'vibrational', basis, theory)
+        calculation = _fetch_or_submit_calculation(mol[0]['_id'], ['vibrational',
+                                                                   'energy'],
+                                                   basis, theory, functional)
 
         pending = parse('properties.pending').find(calculation)
         if pending:
@@ -413,13 +438,13 @@ class Reaction(object):
 
         return (selected_calc['totalEnergy'], selected_calc['zeroPointEnergyCorrection'])
 
-    def free_energy(self, basis=None, theory=None):
+    def free_energy(self, basis=None, theory=None, functional=None):
 
         def _sum(formulas):
             pending_calculations = []
             energy = 0
             for formula in formulas:
-                free_energy = self._fetch_free_energy(formula, basis, theory)
+                free_energy = self._fetch_free_energy(formula, basis, theory, functional)
 
                 if isinstance(free_energy, CalculationResult):
                     pending_calculations.append(free_energy)
@@ -503,7 +528,7 @@ def compose_equation(equation, **vars):
 
     return equation.render(**vars)
 
-def show_free_energies(reactions, basis=None, theory=None):
+def show_free_energies(reactions, basis=None, theory=None, functional=None):
     free_energy_chart_data = {
         'freeEnergy': [],
         'reaction': []
@@ -512,7 +537,7 @@ def show_free_energies(reactions, basis=None, theory=None):
     pending_calculations = []
     for reaction in reactions:
         equation = reaction.equation
-        free_energy = reaction.free_energy(basis, theory)
+        free_energy = reaction.free_energy(basis, theory, functional)
 
         if isinstance(free_energy, list):
             pending_calculations += free_energy
