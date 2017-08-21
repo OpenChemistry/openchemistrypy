@@ -140,7 +140,8 @@ def setup_input(task, input_, cluster):
 
     # We are using a specific one
     if optimization_calculation_id is not None:
-        r = client.get('calculations/%s/xyz' % optimization_calculation_id, jsonResp=False)
+        r = client.get('calculations/%s/xyz' % optimization_calculation_id,
+                       jsonResp=False)
         xyz = r.content
     # If we have not calculations then just use the geometry stored in molecules
     elif best_calc is None:
@@ -151,8 +152,19 @@ def setup_input(task, input_, cluster):
             calculation['properties']['calculationTypes'].append('optimization')
     # Fetch xyz for best geometry
     else:
-        r = client.get('calculations/%s/xyz' % best_calc['_id'], jsonResp=False)
+        optimization_calculation_id = best_calc['_id']
+        r = client.get('calculations/%s/xyz' % optimization_calculation_id,
+                       jsonResp=False)
         xyz = r.content
+
+    # If we are using an existing calculation as the input geometry record it
+    if optimization_calculation_id is not None:
+        props = calculation['properties']
+        props['input'] = {
+            'calculationId': optimization_calculation_id
+        }
+        calculation = client.put('calculations/%s/properties' % calculation['_id'],
+                                 json=props)
 
     oc_folder = _get_oc_folder(client)
     run_folder = client.createFolder(oc_folder['_id'],
