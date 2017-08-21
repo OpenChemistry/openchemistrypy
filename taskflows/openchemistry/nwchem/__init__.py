@@ -78,20 +78,7 @@ def _get_oc_folder(client):
 
     return oc_folder
 
-@cumulus.taskflow.task
-def setup_input(task, input_, cluster):
-    client = create_girder_client(
-        task.taskflow.girder_api_url, task.taskflow.girder_token)
-
-    calculation_id = parse('calculation._id').find(input_)
-    if not calculation_id:
-        raise Exception('Unable to extract calculation id.')
-    calculation_id = calculation_id[0].value
-
-    # Fetch the "best" geometry we currently have
-    calculation = client.get('calculations/%s' % calculation_id)
-    molecule_id = calculation['moleculeId']
-
+def _fetch_best_geometry(client, molecule_id):
     # Fetch our best geometry
     params = {
         'moleculeId': molecule_id,
@@ -103,8 +90,60 @@ def setup_input(task, input_, cluster):
 
     calculations = client.get('calculations', parameters=params)
 
+    if len(calculations) < 1:
+        return None
+
+    return calculations[0]
+
+@cumulus.taskflow.task
+def setup_input(task, input_, cluster):
+    client = create_girder_client(
+        task.taskflow.girder_api_url, task.taskflow.girder_token)
+
+    optimize = input_['optimize']
+    calculation_id = parse('calculation._id').find(input_)
+    if not calculation_id:
+        raise Exception('Unable to extract calculation id.')
+    calculation_id = calculation_id[0].value
+    calculation = client.get('calculations/%s' % calculation_id)
+    molecule_id = calculation['moleculeId']
+
+    optimization_calculation_id = None
+    # We have been asked to use a specific optimized geometry, see if we have it
+    if optimize:
+        parameters = {
+            'moleculeId': molecule_id,
+            'calculationType': 'optimizations',
+        }
+
+        basis = parse('properties.basisSet.name').find(calculation)
+        if basis:
+            parameters['basis'] = basis[0].value
+
+        functional = parse('properties.functional').find(calculation)
+        if functional:
+            parameters['functional'] = functional[0].value.lower()
+
+        theory = parse('properties.theory').find(calculation)
+        if theory:
+            parameters['theory'] = theory[0].value.lower()
+
+
+        calculations = client.get('calculations', parameters)
+
+        if len(calculations) > 0:
+            optimization_calculation_id = calculations[0]['_id']
+
+    best_calc = None
+    if optimization_calculation_id is None:
+        best_calc = _fetch_best_geometry(client, molecule_id)
+
+    # We are using a specific one
+    if optimization_calculation_id is not None:
+        r = client.get('calculations/%s/xyz' % optimization_calculation_id, jsonResp=False)
+        xyz = r.content
     # If we have not calculations then just use the geometry stored in molecules
-    if len(calculations) != 1:
+    elif best_calc is None:
         r = client.get('molecules/%s/xyz' % molecule_id, jsonResp=False)
         xyz = r.content
         # As we might be using an unoptimized structure add the optimize step
@@ -112,8 +151,6 @@ def setup_input(task, input_, cluster):
             calculation['properties']['calculationTypes'].append('optimization')
     # Fetch xyz for best geometry
     else:
-        print('using existing structure')
-        best_calc = calculations[0]
         r = client.get('calculations/%s/xyz' % best_calc['_id'], jsonResp=False)
         xyz = r.content
 
@@ -131,6 +168,11 @@ def setup_input(task, input_, cluster):
 
     for calculation_type in calculation_types:
         params[calculation_type] = True
+
+    # If we have been asked to use a optimized structure make sure we
+    # run the optimization if we couldn't find calculation.
+    if optimize and optimization_calculation_id is None:
+        params['optimization'] = True
 
     basis = parse('properties.basisSet.name').find(calculation)
     if basis:

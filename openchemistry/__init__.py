@@ -21,7 +21,7 @@ if girder_host:
 def _fetch_calculation(molecule_id, type_=None, basis=None, theory=None, functional=None):
     parameters = {
         'moleculeId': molecule_id,
-	'sortByTheory': True
+  'sortByTheory': True
     }
 
     if type_ is not None:
@@ -44,7 +44,7 @@ def _fetch_calculation(molecule_id, type_=None, basis=None, theory=None, functio
     # Pick the "best"
     return calculations[0]
 
-def _submit_calculation(cluster_id, pending_calculation_id):
+def _submit_calculation(cluster_id, pending_calculation_id, optimize):
     if cluster_id is None:
         raise Exception('Unable to submit calculation, no cluster configured.')
 
@@ -62,7 +62,8 @@ def _submit_calculation(cluster_id, pending_calculation_id):
         'input': {
             'calculation': {
                 '_id': pending_calculation_id
-            }
+            },
+            'optimize': optimize
         }
     }
     girder_client.put('taskflows/%s/start' % taskflow['_id'], json=body)
@@ -81,7 +82,6 @@ def _fetch_taskflow_status(taskflow_id):
      return r['status']
 
 def _create_pending_calculation(molecule_id, type_, basis, theory, functional=None):
-    print(type_)
     if not isinstance(type_, list):
         type_ = [type_]
 
@@ -106,7 +106,7 @@ def _create_pending_calculation(molecule_id, type_, basis, theory, functional=No
 
     return calculation
 
-def _fetch_or_submit_calculation(molecule_id, type_, basis, theory, functional=None):
+def _fetch_or_submit_calculation(molecule_id, type_, basis, theory, functional=None, optimize=False):
     global cluster_id
     # If a functional has been provided default theory to dft
     if theory is None and functional is not None:
@@ -118,7 +118,7 @@ def _fetch_or_submit_calculation(molecule_id, type_, basis, theory, functional=N
     if calculation is None:
         calculation = _create_pending_calculation(molecule_id, type_, basis,
                                                   theory, functional)
-        taskflow_id = _submit_calculation(cluster_id, calculation['_id'])
+        taskflow_id = _submit_calculation(cluster_id, calculation['_id'], optimize)
         # Patch calculation to include taskflow id
         props = calculation['properties']
         props['taskFlowId'] = taskflow_id
@@ -140,7 +140,10 @@ class Molecule(object):
             pending = pending[0].value
 
         taskflow_id = parse('properties.taskFlowId').find(calculation)
-        taskflow_id = taskflow_id[0].value
+        if taskflow_id:
+            taskflow_id = taskflow_id[0].value
+        else:
+            taskflow_id = None
         calculation = CalculationResult(calculation['_id'], calculation['properties'])
 
         if pending:
@@ -149,15 +152,19 @@ class Molecule(object):
         return calculation
 
 
-    def frequencies(self, basis=None, theory=None, functional=None):
+    def frequencies(self, optimize=False, basis=None, theory=None, functional=None):
         type_ = 'vibrational'
-        calculation = _fetch_or_submit_calculation(self._id, type_, basis, theory, functional)
+        calculation = _fetch_or_submit_calculation(self._id, type_, basis, theory,
+                                                   functional, optimize)
         pending = parse('properties.pending').find(calculation)
         if pending:
             pending = pending[0].value
 
         taskflow_id = parse('properties.taskFlowId').find(calculation)
-        taskflow_id = taskflow_id[0].value
+        if taskflow_id:
+            taskflow_id = taskflow_id[0].value
+        else:
+            taskflow_id = None
         calculation = FrequenciesCalculationResult(calculation['_id'], calculation['properties'])
 
         if pending:
@@ -165,11 +172,9 @@ class Molecule(object):
 
         return calculation
 
-    def energy(self, basis=None, theory=None, functional=None):
+    def energy(self, optimize=False, basis=None, theory=None, functional=None):
         return CalculationResult()
 
-    def optimize_frequencies(self, basis=None, theory=None, functional=None):
-        return FrequenciesCalculationResult()
 
     @property
     def structure(self):
@@ -217,7 +222,6 @@ class Frequencies(object):
             # Outside notebook print CJSON
             print(self.table)
 
-    @property
     def table(self):
         return self._calculation_result._vibrational_modes
 
