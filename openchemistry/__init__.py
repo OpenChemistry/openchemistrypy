@@ -173,8 +173,24 @@ class Molecule(object):
         return calculation
 
     def energy(self, optimize=False, basis=None, theory=None, functional=None):
-        return CalculationResult()
+        type_ = 'energy'
+        calculation = _fetch_or_submit_calculation(self._id, type_, basis, theory,
+                                                   functional, optimize)
+        pending = parse('properties.pending').find(calculation)
+        if pending:
+            pending = pending[0].value
 
+        taskflow_id = parse('properties.taskFlowId').find(calculation)
+        if taskflow_id:
+            taskflow_id = taskflow_id[0].value
+        else:
+            taskflow_id = None
+        calculation = CalculationResult(calculation['_id'], calculation['properties'])
+
+        if pending:
+            calculation = PendingCalculationResultWrapper(calculation, taskflow_id)
+
+        return calculation
 
     @property
     def structure(self):
