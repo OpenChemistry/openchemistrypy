@@ -44,14 +44,19 @@ def _fetch_calculation(molecule_id, type_=None, basis=None, theory=None, functio
     # Pick the "best"
     return calculations[0]
 
-def _submit_calculation(cluster_id, pending_calculation_id, optimize):
+def _submit_calculation(cluster_id, pending_calculation_id, optimize, calculation_types=None):
     if cluster_id is None:
         raise Exception('Unable to submit calculation, no cluster configured.')
 
     # Create the taskflow
     body = {
-        'taskFlowClass': 'openchemistry.nwchem.NWChemTaskFlow'
+        'taskFlowClass': 'openchemistry.nwchem.NWChemTaskFlow',
+        'meta': {
+            'code': 'NWChem (version 27327)'
+        }
     }
+    if calculation_types is not None:
+        body['meta']['type'] = calculation_types
 
     taskflow = girder_client.post('taskflows', json=body)
     # Start the taskflow
@@ -117,8 +122,9 @@ def _fetch_or_submit_calculation(molecule_id, type_, basis, theory, functional=N
 
     if calculation is None:
         calculation = _create_pending_calculation(molecule_id, type_, basis,
-                                                  theory, functional)
-        taskflow_id = _submit_calculation(cluster_id, calculation['_id'], optimize)
+                                                  theory, functional, input_geometry)
+        calculation_types = parse('properties.calculationTypes').find(calculation)[0].value
+        taskflow_id = _submit_calculation(cluster_id, calculation['_id'], optimize, calculation_types)
         # Patch calculation to include taskflow id
         props = calculation['properties']
         props['taskFlowId'] = taskflow_id
