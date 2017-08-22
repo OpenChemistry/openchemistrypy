@@ -13,25 +13,25 @@ basis spherical
  * library {{basis|default('Def2-TZVP')}}
 end
 
-{% if theory == 'RHF' %}
+{% if theory|lower == 'rhf' or theory|lower == 'scf' %}
 {% set task = 'scf' %}
-{% elif theory == 'B3LYP' %}
+{% elif theory|lower == 'dft' %}
 {% set task = 'dft' %}
 dft
-  xc b3lyp
+  xc {{functional|default('b3lyp')}}
   mult {{multiplicity|default(1)}}
 end
-{% elif theory == 'MP2' %}
+{% elif theory|lower == 'mp2' %}
 {% set task = 'mp2' %}
 mp2
-  # Exclude core electrons from MP2 treatment:\n"
+  # Exclude core electrons from MP2 treatment:"
   freeze atomic
 end
-{% elif theory == 'CCSD' %}
+{% elif theory|lower == 'ccsd' %}
 {% set task = 'ccsd' %}
 ccsd
-  # Exclude core electrons from coupled cluster perturbations:\n"
-  freeze atomic\n"
+  # Exclude core electrons from coupled cluster perturbations:"
+  freeze atomic
 end
 {% endif %}
 

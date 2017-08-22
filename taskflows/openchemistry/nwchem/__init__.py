@@ -78,22 +78,98 @@ def _get_oc_folder(client):
 
     return oc_folder
 
+def _fetch_best_geometry(client, molecule_id):
+    # Fetch our best geometry
+    params = {
+        'moleculeId': molecule_id,
+        'sortByTheory': True,
+        'limit': 1,
+        'calculationType': 'optimization',
+        'pending': False
+    }
+
+    calculations = client.get('calculations', parameters=params)
+
+    if len(calculations) < 1:
+        return None
+
+    return calculations[0]
+
 @cumulus.taskflow.task
 def setup_input(task, input_, cluster):
     client = create_girder_client(
         task.taskflow.girder_api_url, task.taskflow.girder_token)
 
+    optimize = input_['optimize']
     calculation_id = parse('calculation._id').find(input_)
     if not calculation_id:
         raise Exception('Unable to extract calculation id.')
     calculation_id = calculation_id[0].value
-
-    # Fetch the geometry
     calculation = client.get('calculations/%s' % calculation_id)
     molecule_id = calculation['moleculeId']
-    r = client.get('molecules/%s/xyz' % molecule_id, jsonResp=False)
-    xyz = r.content
-    print(xyz)
+
+    optimization_calculation_id = None
+    input_calculation = parse('properties.input.calculationId').find(calculation)
+    # We have been asked to use a specific calculation
+    if input_calculation:
+        optimization_calculation_id = input_calculation[0].value
+    # We have been asked to use a specific optimized geometry, see if we have it
+    elif optimize:
+        parameters = {
+            'moleculeId': molecule_id,
+            'calculationType': 'optimizations',
+        }
+
+        basis = parse('properties.basisSet.name').find(calculation)
+        if basis:
+            parameters['basis'] = basis[0].value
+
+        functional = parse('properties.functional').find(calculation)
+        if functional:
+            parameters['functional'] = functional[0].value.lower()
+
+        theory = parse('properties.theory').find(calculation)
+        if theory:
+            parameters['theory'] = theory[0].value.lower()
+
+
+        calculations = client.get('calculations', parameters)
+
+        if len(calculations) > 0:
+            optimization_calculation_id = calculations[0]['_id']
+
+    best_calc = None
+    if optimization_calculation_id is None:
+        best_calc = _fetch_best_geometry(client, molecule_id)
+
+    # We are using a specific one
+    if optimization_calculation_id is not None:
+        r = client.get('calculations/%s/xyz' % optimization_calculation_id,
+                       jsonResp=False)
+        xyz = r.content
+    # If we have not calculations then just use the geometry stored in molecules
+    elif best_calc is None:
+        r = client.get('molecules/%s/xyz' % molecule_id, jsonResp=False)
+        xyz = r.content
+        # As we might be using an unoptimized structure add the optimize step
+        if 'optimization' not in calculation['properties']['calculationTypes']:
+            calculation['properties']['calculationTypes'].append('optimization')
+    # Fetch xyz for best geometry
+    else:
+        optimization_calculation_id = best_calc['_id']
+        r = client.get('calculations/%s/xyz' % optimization_calculation_id,
+                       jsonResp=False)
+        xyz = r.content
+
+    # If we are using an existing calculation as the input geometry record it
+    if optimization_calculation_id is not None:
+        props = calculation['properties']
+        props['input'] = {
+            'calculationId': optimization_calculation_id
+        }
+        calculation = client.put('calculations/%s/properties' % calculation['_id'],
+                                 json=props)
+
     oc_folder = _get_oc_folder(client)
     run_folder = client.createFolder(oc_folder['_id'],
                                      datetime.datetime.now().strftime("%Y_%m_%d-%H_%M_%f"))
@@ -101,10 +177,7 @@ def setup_input(task, input_, cluster):
                                        'input')
 
     # Generate input file
-    params = {
-        # For now we always need an energy calculation first
-        'energy': True
-    }
+    params = {}
     calculation_types = parse('properties.calculationTypes').find(calculation)
     if calculation_types:
         calculation_types = calculation_types[0].value
@@ -112,15 +185,22 @@ def setup_input(task, input_, cluster):
     for calculation_type in calculation_types:
         params[calculation_type] = True
 
-    basis = parse('properties.basis').find(calculation)
+    # If we have been asked to use a optimized structure make sure we
+    # run the optimization if we couldn't find calculation.
+    if optimize and optimization_calculation_id is None:
+        params['optimization'] = True
+
+    basis = parse('properties.basisSet.name').find(calculation)
     if basis:
         params['basis'] = basis[0].value
 
-    theory = parse('properties.theory').find(calculation)
-    if theory:
-        params['theory'] = theory[0].value.upper()
+    functional = parse('properties.functional').find(calculation)
+    if functional:
+        params['functional'] = functional[0].value.lower()
 
     theory = parse('properties.theory').find(calculation)
+    if theory:
+        params['theory'] = theory[0].value.lower()
 
     template_path = os.path.dirname(__file__)
     jinja2_env = jinja2.Environment(loader=jinja2.FileSystemLoader(template_path),
