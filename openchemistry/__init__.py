@@ -551,22 +551,43 @@ def _find_using_cactus(identifier):
     else:
         return None
 
-def find_structure(identifier):
+def find_structure(identifier, basis=None, theory=None, functional=None):
+    is_calc_query = (basis is not None or theory is not None
+                     or functional is not None)
 
     # InChiKey?
     if _is_inchi_key(identifier):
         try:
             molecule = girder_client.get('molecules/inchikey/%s' % identifier)
 
-            return Molecule(molecule['_id'], molecule['cjson'])
+            # Are we search for a specific calculation?
+            if is_calc_query:
+                # Look for optimization calculation
+                cal = _fetch_calculation(molecule['_id'], 'optimization',
+                                         basis, theory, functional)
+
+                if cal is not None:
+                    # TODO We should probably pass in the full calculation
+                    # so we don't have to fetch it again.
+                    return CalculationResult(cal['_id'])
+                else:
+                    return None
+            else:
+                return Molecule(molecule['_id'], molecule['cjson'])
         except HttpError as ex:
             if ex.status == 404:
                 # Use cactus to try a lookup the structure
                 molecule = _find_using_cactus(identifier)
             else:
                 raise
-    else:
-        molecule = _find_using_cactus(identifier)
+
+    # If we have been provided basis, theory or functional and we haven't found
+    # a calculation, then we are done.
+    if is_calc_query:
+        return None
+
+    # Try cactus
+    molecule = _find_using_cactus(identifier)
 
 
     if not molecule:
