@@ -109,8 +109,12 @@ def setup_input(task, input_, cluster):
     molecule_id = calculation['moleculeId']
 
     optimization_calculation_id = None
+    input_calculation = parse('properties.input.calculationId').find(calculation)
+    # We have been asked to use a specific calculation
+    if input_calculation:
+        optimization_calculation_id = input_calculation[0].value
     # We have been asked to use a specific optimized geometry, see if we have it
-    if optimize:
+    elif optimize:
         parameters = {
             'moleculeId': molecule_id,
             'calculationType': 'optimizations',

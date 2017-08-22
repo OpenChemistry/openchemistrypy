@@ -86,7 +86,8 @@ def _fetch_taskflow_status(taskflow_id):
 
      return r['status']
 
-def _create_pending_calculation(molecule_id, type_, basis, theory, functional=None):
+def _create_pending_calculation(molecule_id, type_, basis, theory, functional=None,
+                                input_geometry=None):
     if not isinstance(type_, list):
         type_ = [type_]
 
@@ -104,6 +105,11 @@ def _create_pending_calculation(molecule_id, type_, basis, theory, functional=No
         }
     }
 
+    if input_geometry is not None:
+        body['properties']['input'] = {
+            'calculationId': input_geometry
+        }
+
     if functional is not None:
         body['properties']['functional'] = functional.lower()
 
@@ -111,7 +117,8 @@ def _create_pending_calculation(molecule_id, type_, basis, theory, functional=No
 
     return calculation
 
-def _fetch_or_submit_calculation(molecule_id, type_, basis, theory, functional=None, optimize=False):
+def _fetch_or_submit_calculation(molecule_id, type_, basis, theory, functional=None, optimize=False,
+                                 input_geometry=None):
     global cluster_id
     # If a functional has been provided default theory to dft
     if theory is None and functional is not None:
@@ -132,71 +139,81 @@ def _fetch_or_submit_calculation(molecule_id, type_, basis, theory, functional=N
 
     return calculation
 
+def _optimize(molecule_id, basis=None, theory=None, functional=None, input_geometry=None):
+    type_ = 'optimization'
+    calculation =  _fetch_or_submit_calculation(molecule_id, type_, basis, theory,
+                                                functional, input_geometry=input_geometry)
+    pending = parse('properties.pending').find(calculation)
+    if pending:
+        pending = pending[0].value
+
+    taskflow_id = parse('properties.taskFlowId').find(calculation)
+    if taskflow_id:
+        taskflow_id = taskflow_id[0].value
+    else:
+        taskflow_id = None
+    calculation = CalculationResult(calculation['_id'], calculation['properties'], molecule_id)
+
+    if pending:
+        calculation = PendingCalculationResultWrapper(calculation, taskflow_id)
+
+    return calculation
+
+def _frequencies(molecule_id,  optimize=False, basis=None, theory=None,
+                 functional=None, input_geometry=None):
+    type_ = 'vibrational'
+    calculation = _fetch_or_submit_calculation(molecule_id, type_, basis, theory,
+                                               functional, optimize, input_geometry)
+    pending = parse('properties.pending').find(calculation)
+    if pending:
+        pending = pending[0].value
+
+    taskflow_id = parse('properties.taskFlowId').find(calculation)
+    if taskflow_id:
+        taskflow_id = taskflow_id[0].value
+    else:
+        taskflow_id = None
+    calculation = FrequenciesCalculationResult(calculation['_id'], calculation['properties'], molecule_id)
+
+    if pending:
+        calculation = PendingCalculationResultWrapper(calculation, taskflow_id)
+
+    return calculation
+
+def _energy(molecule_id, optimize=False, basis=None, theory=None, functional=None, input_geometry=None):
+    type_ = 'energy'
+    calculation = _fetch_or_submit_calculation(molecule_id, type_, basis, theory,
+                                               functional, optimize, input_geometry)
+    pending = parse('properties.pending').find(calculation)
+    if pending:
+        pending = pending[0].value
+
+    taskflow_id = parse('properties.taskFlowId').find(calculation)
+    if taskflow_id:
+        taskflow_id = taskflow_id[0].value
+    else:
+        taskflow_id = None
+    calculation = CalculationResult(calculation['_id'], calculation['properties'], molecule_id)
+
+    if pending:
+        calculation = PendingCalculationResultWrapper(calculation, taskflow_id)
+
+    return calculation
+
+
 class Molecule(object):
     def __init__(self, _id, cjson=None):
         self._id = _id
         self._cjson = cjson
 
     def optimize(self, basis=None, theory=None, functional=None):
-        type_ = 'optimization'
-        calculation =  _fetch_or_submit_calculation(self._id, type_, basis, theory,
-                                                    functional)
-        pending = parse('properties.pending').find(calculation)
-        if pending:
-            pending = pending[0].value
-
-        taskflow_id = parse('properties.taskFlowId').find(calculation)
-        if taskflow_id:
-            taskflow_id = taskflow_id[0].value
-        else:
-            taskflow_id = None
-        calculation = CalculationResult(calculation['_id'], calculation['properties'])
-
-        if pending:
-            calculation = PendingCalculationResultWrapper(calculation, taskflow_id)
-
-        return calculation
-
+        return _optimize(self._id, basis, theory, functional)
 
     def frequencies(self, optimize=False, basis=None, theory=None, functional=None):
-        type_ = 'vibrational'
-        calculation = _fetch_or_submit_calculation(self._id, type_, basis, theory,
-                                                   functional, optimize)
-        pending = parse('properties.pending').find(calculation)
-        if pending:
-            pending = pending[0].value
-
-        taskflow_id = parse('properties.taskFlowId').find(calculation)
-        if taskflow_id:
-            taskflow_id = taskflow_id[0].value
-        else:
-            taskflow_id = None
-        calculation = FrequenciesCalculationResult(calculation['_id'], calculation['properties'])
-
-        if pending:
-            calculation = PendingCalculationResultWrapper(calculation, taskflow_id)
-
-        return calculation
+        return _frequencies(self._id, optimize, basis, theory, functional)
 
     def energy(self, optimize=False, basis=None, theory=None, functional=None):
-        type_ = 'energy'
-        calculation = _fetch_or_submit_calculation(self._id, type_, basis, theory,
-                                                   functional, optimize)
-        pending = parse('properties.pending').find(calculation)
-        if pending:
-            pending = pending[0].value
-
-        taskflow_id = parse('properties.taskFlowId').find(calculation)
-        if taskflow_id:
-            taskflow_id = taskflow_id[0].value
-        else:
-            taskflow_id = None
-        calculation = CalculationResult(calculation['_id'], calculation['properties'])
-
-        if pending:
-            calculation = PendingCalculationResultWrapper(calculation, taskflow_id)
-
-        return calculation
+        return _energy(self._id, optimize, basis, theory, functional)
 
     @property
     def structure(self):
@@ -306,11 +323,12 @@ class Orbitals(object):
 
 class CalculationResult(object):
 
-    def __init__(self, _id=None, properties=None):
+    def __init__(self, _id=None, properties=None, molecule_id=None):
         self._id = _id
         self._cjson_ = None
         self._vibrational_modes_ = None
         self._orbitals = None
+        self._molecule_id = molecule_id
         self.properties = properties
 
     @property
@@ -341,9 +359,22 @@ class CalculationResult(object):
 
         return self._orbitals
 
+    def optimize(self, basis=None, theory=None, functional=None):
+        return _optimize(self._molecule_id, basis, theory, functional, self._id)
+
+    def frequencies(self, optimize=False, basis=None, theory=None, functional=None):
+        return _frequencies(self._molecule_id, optimize, basis, theory,
+                            functional, self._id)
+
+    def energy(self, optimize=False, basis=None, theory=None, functional=None):
+        return _energy(self._molecule_id, optimize, basis, theory, functional,
+                       self._id)
+
+
 class FrequenciesCalculationResult(CalculationResult):
-    def __init__(self, _id=None, properties=None):
-        super(FrequenciesCalculationResult, self).__init__(_id, properties)
+    def __init__(self, _id=None, properties=None, molecule_id=None):
+        super(FrequenciesCalculationResult, self).__init__(_id, properties,
+                                                           molecule_id)
 
     @property
     def frequencies(self):
