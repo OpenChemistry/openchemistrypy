@@ -42,7 +42,7 @@ setup(
     packages=['openchemistry'],
 
     install_requires=[
-        'girder_client',
+        'girder_client>=2.3.0',
         'jinja2',
         'jsonpath-rw'
     ],
