@@ -59,7 +59,7 @@ class NWChemTaskFlow(TaskFlow):
             cluster = model.filter(cluster, user, passphrase=False)
 
         super(NWChemTaskFlow, self).start(
-            setup_input.s(input_, user, cluster),
+            setup_input.s(input_, cluster),
             *args, **kwargs)
 
 def _get_cori(client):
