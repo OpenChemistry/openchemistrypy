@@ -306,6 +306,9 @@ def _create_job_nersc(task, cluster, input_file, input_folder):
 
     return job
 
+def _nersc(cluster):
+    return cluster.get('name') in ['cori']
+
 def _create_job(task, cluster, input_file, input_folder):
     if _nersc(cluster):
         return _create_job_nersc(task, cluster, input_file, input_folder)
