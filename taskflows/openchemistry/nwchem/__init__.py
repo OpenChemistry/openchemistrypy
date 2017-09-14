@@ -47,7 +47,8 @@ class NWChemTaskFlow(TaskFlow):
         if input_ is None:
             raise Exception('Unable to extract input.')
 
-        if cluster is None:
+
+        if '_id' not in cluster and 'name' not in cluster:
             raise Exception('Unable to extract cluster.')
 
         cluster_id = parse('cluster._id').find(kwargs)
@@ -56,12 +57,31 @@ class NWChemTaskFlow(TaskFlow):
             model = ModelImporter.model('cluster', 'cumulus')
             cluster = model.load(cluster_id, user=user, level=AccessType.ADMIN)
             cluster = model.filter(cluster, user, passphrase=False)
-        else:
-            raise Exception('Cluster don\'t contain _id.')
 
         super(NWChemTaskFlow, self).start(
-            setup_input.s(input_, cluster),
+            setup_input.s(input_, user, cluster),
             *args, **kwargs)
+
+def _get_cori(client):
+    params = {
+        'type': 'newt'
+    }
+    clusters = client.get('clusters', parameters=params)
+    for cluster in clusters:
+        if cluster['name'] == 'cori':
+            return cluster
+
+    # We need to create one
+    body = {
+        'config': {
+            'host': 'cori'
+        },
+        'name': 'cori',
+        'type': 'newt'
+    }
+    cluster = client.post('clusters', data=json.dumps(body))
+
+    return cluster
 
 def _get_oc_folder(client):
     me = client.get('user/me')
@@ -99,6 +119,12 @@ def _fetch_best_geometry(client, molecule_id):
 def setup_input(task, input_, cluster):
     client = create_girder_client(
         task.taskflow.girder_api_url, task.taskflow.girder_token)
+
+    if cluster.get('name') == 'cori':
+        cluster = _get_cori(client)
+
+    if '_id' not in cluster:
+        raise Exception('Invalid cluster configurations: %s' % cluster)
 
     optimize = input_['optimize']
     calculation_id = parse('calculation._id').find(input_)
@@ -220,18 +246,15 @@ def setup_input(task, input_, cluster):
 
     submit.delay(input_, cluster, run_folder, input_file, input_folder)
 
-
-def _create_job(task, input_file, input_folder):
+def _create_job_ec2(task, cluster, input_file, input_folder):
     task.taskflow.logger.info('Create NWChem job.')
+    input_name = input_file['name']
 
     body = {
         'name': 'nwchem_run',
-        'commands': [
-            'docker pull openchemistry/nwchem-json:latest',
-            'docker run -v $(pwd):/data openchemistry/nwchem-json:latest %s' % (
-                input_file['name'])
-            #'cp -r /home/test/597b90b6f6571037648d575a/* .'
-        ],
+        'commands': ['docker pull openchemistry/nwchem-json:latest',
+                     'docker run -v $(pwd):/data openchemistry/nwchem-json:latest %s' % (
+                input_name)],
         'input': [
             {
               'folderId': input_folder['_id'],
@@ -252,9 +275,46 @@ def _create_job(task, input_file, input_folder):
 
     return job
 
+
+def _create_job_nersc(task, cluster, input_file, input_folder):
+    task.taskflow.logger.info('Create NWChem job.')
+
+    body = {
+        'name': 'nwchem_run',
+        'commands': ['/usr/bin/srun -N 1  -n 32 %s %s' % (os.environ.get('OC_NWCHEM_PATH', 'nwchem'), input_file['name'])],
+        'input': [
+            {
+              'folderId': input_folder['_id'],
+              'path': '.'
+            }
+        ],
+        'output': [],
+        'params': {
+            'taskFlowId': task.taskflow.id,
+            'numberOfNodes': 1,
+            'queue': 'debug',
+            'constraint': 'haswell',
+            'account': os.environ.get('OC_ACCOUNT')
+        }
+    }
+
+    client = create_girder_client(
+                task.taskflow.girder_api_url, task.taskflow.girder_token)
+
+    job = client.post('jobs', data=json.dumps(body))
+    task.taskflow.set_metadata('jobs', [job])
+
+    return job
+
+def _create_job(task, cluster, input_file, input_folder):
+    if _nersc(cluster):
+        return _create_job_nersc(task, cluster, input_file, input_folder)
+    else:
+        return _create_job_ec2(task, cluster, input_file, input_folder)
+
 @cumulus.taskflow.task
 def submit(task, input_, cluster, run_folder, input_file, input_folder):
-    job = _create_job(task, input_file, input_folder)
+    job = _create_job(task, cluster, input_file, input_folder)
 
     girder_token = task.taskflow.girder_token
     task.taskflow.set_metadata('cluster', cluster)
