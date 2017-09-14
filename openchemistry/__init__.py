@@ -44,8 +44,11 @@ def _fetch_calculation(molecule_id, type_=None, basis=None, theory=None, functio
     # Pick the "best"
     return calculations[0]
 
+def _nersc():
+    return os.environ.get('OC_SITE') == 'NERSC'
+
 def _submit_calculation(cluster_id, pending_calculation_id, optimize, calculation_types=None):
-    if cluster_id is None:
+    if cluster_id is None and not _nersc():
         raise Exception('Unable to submit calculation, no cluster configured.')
 
     # Create the taskflow
@@ -61,9 +64,6 @@ def _submit_calculation(cluster_id, pending_calculation_id, optimize, calculatio
     taskflow = girder_client.post('taskflows', json=body)
     # Start the taskflow
     body = {
-        'cluster': {
-            '_id': cluster_id
-        },
         'input': {
             'calculation': {
                 '_id': pending_calculation_id
@@ -71,6 +71,16 @@ def _submit_calculation(cluster_id, pending_calculation_id, optimize, calculatio
             'optimize': optimize
         }
     }
+
+    if cluster_id is not None:
+        body['cluster'] = {
+            '_id': cluster_id
+        }
+    elif _nersc():
+        body['cluster'] = {
+            'name': 'cori'
+        }
+
     girder_client.put('taskflows/%s/start' % taskflow['_id'], json=body)
 
     # Set the pending calculation id in the meta data
