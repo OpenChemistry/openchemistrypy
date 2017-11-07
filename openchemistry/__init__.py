@@ -8,14 +8,21 @@ from jsonpath_rw import parse
 
 girder_host = os.environ.get('GIRDER_HOST')
 girder_port = os.environ.get('GIRDER_PORT')
+girder_scheme = os.environ.get('GIRDER_SCHEME', 'http')
+girder_api_root = os.environ.get('GIRDER_API_ROOT', '/api/v1')
 girder_api_key = os.environ.get('GIRDER_API_KEY')
+girder_token = os.environ.get('GIRDER_TOKEN')
 app_base_url = os.environ.get('APP_BASE_URL')
 cluster_id = os.environ.get('CLUSTER_ID')
 
 if girder_host:
     girder_client = GirderClient(host=girder_host, port=girder_port,
-                                 scheme='http')
-    girder_client.authenticate(apiKey=girder_api_key)
+                                 scheme=girder_scheme, apiRoot=girder_api_root)
+
+    if girder_api_key is not None:
+        girder_client.authenticate(apiKey=girder_api_key)
+    elif girder_token is not None:
+        girder_client.token = girder_token
 
 # TODO Need to use basis and theory
 def _fetch_calculation(molecule_id, type_=None, basis=None, theory=None, functional=None):
