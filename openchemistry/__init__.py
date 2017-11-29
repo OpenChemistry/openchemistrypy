@@ -6,6 +6,8 @@ import urllib.parse
 import inspect
 from jsonpath_rw import parse
 
+from .utils import lookup_file
+
 girder_host = os.environ.get('GIRDER_HOST')
 girder_port = os.environ.get('GIRDER_PORT')
 girder_scheme = os.environ.get('GIRDER_SCHEME', 'http')
@@ -14,6 +16,7 @@ girder_api_key = os.environ.get('GIRDER_API_KEY')
 girder_token = os.environ.get('GIRDER_TOKEN')
 app_base_url = os.environ.get('APP_BASE_URL')
 cluster_id = os.environ.get('CLUSTER_ID')
+jupyterhub_base_url = os.environ.get('JUPYTERHUB_BASE_URL')
 
 if girder_host:
     girder_client = GirderClient(host=girder_host, port=girder_port,
@@ -23,6 +26,8 @@ if girder_host:
         girder_client.authenticate(apiKey=girder_api_key)
     elif girder_token is not None:
         girder_client.token = girder_token
+
+girder_file = lookup_file(girder_client, jupyterhub_base_url)
 
 # TODO Need to use basis and theory
 def _fetch_calculation(molecule_id, type_=None, basis=None, theory=None, functional=None):
@@ -99,9 +104,9 @@ def _submit_calculation(cluster_id, pending_calculation_id, optimize, calculatio
     return taskflow['_id']
 
 def _fetch_taskflow_status(taskflow_id):
-     r = girder_client.get('taskflows/%s/status' % taskflow_id)
+    r = girder_client.get('taskflows/%s/status' % taskflow_id)
 
-     return r['status']
+    return r['status']
 
 def _create_pending_calculation(molecule_id, type_, basis, theory, functional=None,
                                 input_geometry=None):
@@ -119,7 +124,8 @@ def _create_pending_calculation(molecule_id, type_, basis, theory, functional=No
             },
             'theory': theory.lower(),
             'pending': True
-        }
+        },
+        'notebooks': [girder_file['_id']]
     }
 
     if input_geometry is not None:
@@ -153,6 +159,13 @@ def _fetch_or_submit_calculation(molecule_id, type_, basis, theory, functional=N
         props = calculation['properties']
         props['taskFlowId'] = taskflow_id
         calculation = girder_client.put('calculations/%s/properties' % calculation['_id'], json=props)
+    else:
+        # If we all ready have a calculation tag it with this notebooks id
+        body = {
+            'notebooks': [girder_file['_id']]
+        }
+        girder_client.patch('calculations/%s/notebooks' % calculation['_id'],
+                            json=body)
 
     return calculation
 
