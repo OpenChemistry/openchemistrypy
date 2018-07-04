@@ -61,7 +61,16 @@ def _nersc():
 
 def _submit_calculation(cluster_id, pending_calculation_id, optimize, calculation_types=None):
     if cluster_id is None and not _nersc():
-        raise Exception('Unable to submit calculation, no cluster configured.')
+        # Try to get demo cluster
+        params = {
+            'type': 'trad'
+        }
+        clusters = girder_client.get('clusters', params)
+
+        if len(clusters) > 0:
+            cluster_id = clusters[0]['_id']
+        else:
+            raise Exception('Unable to submit calculation, no cluster configured.')
 
     # Create the taskflow
     body = {
