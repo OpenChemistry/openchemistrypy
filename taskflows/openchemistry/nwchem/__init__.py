@@ -275,6 +275,36 @@ def _create_job_ec2(task, cluster, input_file, input_folder):
 
     return job
 
+def _create_job_demo(task, cluster, input_file, input_folder):
+    task.taskflow.logger.info('Create NWChem job.')
+    input_name = input_file['name']
+
+    body = {
+        'name': 'nwchem_run',
+        'commands': ['docker pull openchemistry/nwchem-json:latest',
+                     'docker run -w $(pwd) -v dev_job_data:/data openchemistry/nwchem-json:latest %s' % (
+                input_name)],
+        'input': [
+            {
+              'folderId': input_folder['_id'],
+              'path': '.'
+            }
+        ],
+        'output': [],
+        'params': {
+            'taskFlowId': task.taskflow.id
+        }
+    }
+
+    client = create_girder_client(
+                task.taskflow.girder_api_url, task.taskflow.girder_token)
+
+    job = client.post('jobs', data=json.dumps(body))
+    task.taskflow.set_metadata('jobs', [job])
+
+    return job
+
+
 
 def _create_job_nersc(task, cluster, input_file, input_folder):
     task.taskflow.logger.info('Create NWChem job.')
@@ -309,9 +339,14 @@ def _create_job_nersc(task, cluster, input_file, input_folder):
 def _nersc(cluster):
     return cluster.get('name') in ['cori']
 
+def _demo(cluster):
+    return cluster.get('name') == 'demo_cluster'
+
 def _create_job(task, cluster, input_file, input_folder):
     if _nersc(cluster):
         return _create_job_nersc(task, cluster, input_file, input_folder)
+    elif _demo(cluster):
+        return _create_job_demo(task, cluster, input_file, input_folder)
     else:
         return _create_job_ec2(task, cluster, input_file, input_folder)
 
