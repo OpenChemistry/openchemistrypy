@@ -282,7 +282,7 @@ def _create_job_demo(task, cluster, input_file, input_folder):
     body = {
         'name': 'nwchem_run',
         'commands': ['docker pull openchemistry/nwchem-json:latest',
-                     'docker run -w $(pwd) -v dev_job_data:/data openchemistry/nwchem-json:latest %s' % (
+                     'docker run --rm -w $(pwd) -v dev_job_data:/data openchemistry/nwchem-json:latest %s' % (
                 input_name)],
         'input': [
             {
