@@ -408,9 +408,7 @@ def postprocess(task, _, run_folder, input_, cluster, job):
             json_output_file_id = files[0]['_id']
             # Now call endpoint to ingest result
             body = {
-                'calculationId': input_['calculation']['_id'],
                 'fileId': json_output_file_id,
                 'public': True
             }
-
-            client.post('molecules', json=body)
+            client.put('calculations/%s' % input_['calculation']['_id'], json=body)
