@@ -16,7 +16,7 @@ girder_api_key = os.environ.get('GIRDER_API_KEY')
 girder_token = os.environ.get('GIRDER_TOKEN')
 app_base_url = os.environ.get('APP_BASE_URL')
 cluster_id = os.environ.get('CLUSTER_ID')
-jupyterhub_base_url = os.environ.get('JUPYTERHUB_BASE_URL')
+jupyterhub_url = os.environ.get('OC_JUPYTERHUB_URL')
 
 if girder_host:
     girder_client = GirderClient(host=girder_host, port=girder_port,
@@ -27,7 +27,7 @@ if girder_host:
     elif girder_token is not None:
         girder_client.token = girder_token
 
-girder_file = lookup_file(girder_client, jupyterhub_base_url)
+girder_file = lookup_file(girder_client, jupyterhub_url)
 
 # TODO Need to use basis and theory
 def _fetch_calculation(molecule_id, type_=None, basis=None, theory=None, functional=None):

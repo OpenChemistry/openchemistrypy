@@ -5,7 +5,7 @@ import re
 from IPython.lib import kernel
 
 
-def lookup_file(girder_client, jupyterhub_base_url):
+def lookup_file(girder_client, jupyterhub_url):
     """
     Utility function to lookup the Girder file that the current notebook is running
     from.
@@ -16,11 +16,11 @@ def lookup_file(girder_client, jupyterhub_base_url):
     kernel_id = re.search('kernel-(.*).json', connection_file_path).group(1)
 
     # Authenticate with jupyterhub so we can get the cookie
-    r = requests.post('%s/hub/login' % jupyterhub_base_url, data={'Girder-Token': girder_client.token}, allow_redirects=False)
+    r = requests.post('%s/hub/login' % jupyterhub_url, data={'Girder-Token': girder_client.token}, allow_redirects=False)
     r.raise_for_status()
     cookies = r.cookies
 
-    url = "%s/user/%s/api/sessions" % (jupyterhub_base_url, login)
+    url = "%s/user/%s/api/sessions" % (jupyterhub_url, login)
     r = requests.get(url, cookies=cookies)
     r.raise_for_status()
 
@@ -31,7 +31,7 @@ def lookup_file(girder_client, jupyterhub_base_url):
     name = os.path.basename(path)
 
     # Logout
-    url = "%s/hub/logout" % jupyterhub_base_url
+    url = "%s/hub/logout" % jupyterhub_url
     r = requests.get(url, cookies=cookies)
 
 
