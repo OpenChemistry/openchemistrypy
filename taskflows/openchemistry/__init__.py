@@ -205,11 +205,11 @@ def setup_input_template(task, input_, cluster, task_class):
     if optimization_calculation_id is not None:
         r = client.get('calculations/%s/xyz' % optimization_calculation_id,
                     jsonResp=False)
-        xyz = r.content
+        xyz = r.text
     # If we have not calculations then just use the geometry stored in molecules
     elif best_calc is None:
         r = client.get('molecules/%s/xyz' % molecule_id, jsonResp=False)
-        xyz = r.content
+        xyz = r.text
         # As we might be using an unoptimized structure add the optimize step
         if 'optimization' not in calculation['properties']['calculationTypes']:
             calculation['properties']['calculationTypes'].append('optimization')
@@ -218,7 +218,12 @@ def setup_input_template(task, input_, cluster, task_class):
         optimization_calculation_id = best_calc['_id']
         r = client.get('calculations/%s/xyz' % optimization_calculation_id,
                     jsonResp=False)
-        xyz = r.content
+        xyz = r.text
+
+    # remove the first two lines in the xyz file
+    # (i.e. number of atom and optional comment)
+    xyz_structure = xyz.split('\n')[2:]
+    xyz_structure = '\n'.join(xyz_structure)
 
     # If we are using an existing calculation as the input geometry record it
     if optimization_calculation_id is not None:
@@ -262,7 +267,7 @@ def setup_input_template(task, input_, cluster, task_class):
         params['theory'] = theory[0].value.lower()
 
     with tempfile.TemporaryFile() as fp:
-        task_class.input_generator(params, fp)
+        task_class.input_generator(params, xyz_structure, fp)
         
         # Get the size of the file
         size = fp.seek(0, 2)
@@ -270,10 +275,6 @@ def setup_input_template(task, input_, cluster, task_class):
         name = task_class.input_name
         input_file = client.uploadFile(input_folder['_id'],  fp, name, size,
                                     parentType='folder')
-    # Upload the xyz file
-    size = len(xyz)
-    client.uploadFile(input_folder['_id'], BytesIO(xyz), 'geometry.xyz', size,
-                    parentType='folder')
 
     submit_template.delay(input_, cluster, run_folder, input_file, input_folder, task_class)
 

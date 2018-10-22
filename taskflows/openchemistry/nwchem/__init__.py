@@ -9,11 +9,11 @@ class NWChemTaskFlow(OpenChemistryTaskFlow):
     logger_name = 'Create NWChem job.'
 
     @staticmethod
-    def input_generator(params, tmp_file):
+    def input_generator(params, xyz_structure, tmp_file):
         template_path = os.path.dirname(__file__)
         jinja2_env = jinja2.Environment(loader=jinja2.FileSystemLoader(template_path),
                                         trim_blocks=True)
-        jinja2_env.get_template('oc.nw.j2').stream(**params).dump(tmp_file, encoding='utf8')
+        jinja2_env.get_template('oc.nw.j2').stream(**params, xyz_structure=xyz_structure).dump(tmp_file, encoding='utf8')
 
     @staticmethod
     def copy_output_files(filenames):
