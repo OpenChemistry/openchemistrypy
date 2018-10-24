@@ -223,7 +223,7 @@ def setup_input_template(task, input_, cluster, task_class):
     # remove the first two lines in the xyz file
     # (i.e. number of atom and optional comment)
     xyz_structure = xyz.split('\n')[2:]
-    xyz_structure = '\n'.join(xyz_structure)
+    xyz_structure = '\n  '.join(xyz_structure)
 
     # If we are using an existing calculation as the input geometry record it
     if optimization_calculation_id is not None:
