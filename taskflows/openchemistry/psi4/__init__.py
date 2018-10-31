@@ -4,7 +4,7 @@ from openchemistry import OpenChemistryTaskFlow
 
 class Psi4TaskFlow(OpenChemistryTaskFlow):
 
-    input_name = 'oc.psi4'
+    input_name = 'oc.psi4.in'
     job_name = 'psi4_run'
     logger_name = 'Create Psi4 job.'
 

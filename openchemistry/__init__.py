@@ -30,10 +30,10 @@ if girder_host:
 girder_file = lookup_file(girder_client, jupyterhub_url)
 
 # TODO Need to use basis and theory
-def _fetch_calculation(molecule_id, type_=None, basis=None, theory=None, functional=None):
+def _fetch_calculation(molecule_id, type_=None, basis=None, theory=None, functional=None, code='nwchem'):
     parameters = {
         'moleculeId': molecule_id,
-  'sortByTheory': True
+        'sortByTheory': True
     }
 
     if type_ is not None:
@@ -48,6 +48,9 @@ def _fetch_calculation(molecule_id, type_=None, basis=None, theory=None, functio
     if basis is not None:
         parameters['basis'] = basis
 
+    if code is not None:
+        parameters['code'] = code
+
     calculations = girder_client.get('calculations', parameters)
 
     if len(calculations) < 1:
@@ -59,7 +62,7 @@ def _fetch_calculation(molecule_id, type_=None, basis=None, theory=None, functio
 def _nersc():
     return os.environ.get('OC_SITE') == 'NERSC'
 
-def _submit_calculation(cluster_id, pending_calculation_id, optimize, calculation_types=None):
+def _submit_calculation(cluster_id, pending_calculation_id, optimize, calculation_types=None, code='nwchem'):
     if cluster_id is None and not _nersc():
         # Try to get demo cluster
         params = {
@@ -72,11 +75,20 @@ def _submit_calculation(cluster_id, pending_calculation_id, optimize, calculatio
         else:
             raise Exception('Unable to submit calculation, no cluster configured.')
 
+    if code == 'nwchem':
+        code_label = 'NWChem (version 27327)'
+        taskflow_class = 'openchemistry.nwchem.NWChemTaskFlow'
+    elif code == 'psi4':
+        code_label = 'PSI4 (version 1.2.1)'
+        taskflow_class = 'openchemistry.psi4.Psi4TaskFlow'
+    else:
+        raise Exception('Unable to submit calculation with the %s code' % code)
+
     # Create the taskflow
     body = {
-        'taskFlowClass': 'openchemistry.nwchem.NWChemTaskFlow',
+        'taskFlowClass': taskflow_class,
         'meta': {
-            'code': 'NWChem (version 27327)'
+            'code': code_label
         }
     }
     if calculation_types is not None:
@@ -118,7 +130,7 @@ def _fetch_taskflow_status(taskflow_id):
     return r['status']
 
 def _create_pending_calculation(molecule_id, type_, basis, theory, functional=None,
-                                input_geometry=None):
+                                input_geometry=None, code='nwchem'):
     if not isinstance(type_, list):
         type_ = [type_]
 
@@ -132,7 +144,8 @@ def _create_pending_calculation(molecule_id, type_, basis, theory, functional=No
                 'name': basis.lower()
             },
             'theory': theory.lower(),
-            'pending': True
+            'pending': True,
+            'code': code
         },
         'notebooks': [girder_file['_id']]
     }
@@ -150,20 +163,20 @@ def _create_pending_calculation(molecule_id, type_, basis, theory, functional=No
     return calculation
 
 def _fetch_or_submit_calculation(molecule_id, type_, basis, theory, functional=None, optimize=False,
-                                 input_geometry=None):
+                                 input_geometry=None, code='nwchem'):
     global cluster_id
     # If a functional has been provided default theory to dft
     if theory is None and functional is not None:
         theory = 'dft'
 
-    calculation = _fetch_calculation(molecule_id, type_, basis, theory, functional)
+    calculation = _fetch_calculation(molecule_id, type_, basis, theory, functional, code=code)
     taskflow_id = None
 
     if calculation is None:
         calculation = _create_pending_calculation(molecule_id, type_, basis,
-                                                  theory, functional, input_geometry)
+                                                  theory, functional, input_geometry=input_geometry, code=code)
         calculation_types = parse('properties.calculationTypes').find(calculation)[0].value
-        taskflow_id = _submit_calculation(cluster_id, calculation['_id'], optimize, calculation_types)
+        taskflow_id = _submit_calculation(cluster_id, calculation['_id'], optimize, calculation_types, code=code)
         # Patch calculation to include taskflow id
         props = calculation['properties']
         props['taskFlowId'] = taskflow_id
@@ -178,10 +191,10 @@ def _fetch_or_submit_calculation(molecule_id, type_, basis, theory, functional=N
 
     return calculation
 
-def _optimize(molecule_id, basis=None, theory=None, functional=None, input_geometry=None):
+def _optimize(molecule_id, basis=None, theory=None, functional=None, input_geometry=None, code='nwchem'):
     type_ = 'optimization'
     calculation =  _fetch_or_submit_calculation(molecule_id, type_, basis, theory,
-                                                functional, input_geometry=input_geometry)
+                                                functional, input_geometry=input_geometry, code=code)
     pending = parse('properties.pending').find(calculation)
     if pending:
         pending = pending[0].value
@@ -199,10 +212,10 @@ def _optimize(molecule_id, basis=None, theory=None, functional=None, input_geome
     return calculation
 
 def _frequencies(molecule_id,  optimize=False, basis=None, theory=None,
-                 functional=None, input_geometry=None):
+                 functional=None, input_geometry=None, code='nwchem'):
     type_ = 'vibrational'
     calculation = _fetch_or_submit_calculation(molecule_id, type_, basis, theory,
-                                               functional, optimize, input_geometry)
+                                               functional, optimize, input_geometry, code=code)
     pending = parse('properties.pending').find(calculation)
     if pending:
         pending = pending[0].value
@@ -219,10 +232,10 @@ def _frequencies(molecule_id,  optimize=False, basis=None, theory=None,
 
     return calculation
 
-def _energy(molecule_id, optimize=False, basis=None, theory=None, functional=None, input_geometry=None):
+def _energy(molecule_id, optimize=False, basis=None, theory=None, functional=None, input_geometry=None, code='nwchem'):
     type_ = 'energy'
     calculation = _fetch_or_submit_calculation(molecule_id, type_, basis, theory,
-                                               functional, optimize, input_geometry)
+                                               functional, optimize, input_geometry, code=code)
     pending = parse('properties.pending').find(calculation)
     if pending:
         pending = pending[0].value
@@ -245,14 +258,14 @@ class Molecule(object):
         self._id = _id
         self._cjson = cjson
 
-    def optimize(self, basis=None, theory=None, functional=None):
-        return _optimize(self._id, basis, theory, functional)
+    def optimize(self, basis=None, theory=None, functional=None, code='nwchem'):
+        return _optimize(self._id, basis, theory, functional, code=code)
 
-    def frequencies(self, optimize=False, basis=None, theory=None, functional=None):
-        return _frequencies(self._id, optimize, basis, theory, functional)
+    def frequencies(self, optimize=False, basis=None, theory=None, functional=None, code='nwchem'):
+        return _frequencies(self._id, optimize, basis, theory, functional, code=code)
 
-    def energy(self, optimize=False, basis=None, theory=None, functional=None):
-        return _energy(self._id, optimize, basis, theory, functional)
+    def energy(self, optimize=False, basis=None, theory=None, functional=None, code='nwchem'):
+        return _energy(self._id, optimize, basis, theory, functional, code=code)
 
     @property
     def structure(self):
@@ -590,7 +603,7 @@ def _find_using_cactus(identifier):
     else:
         return None
 
-def find_structure(identifier, basis=None, theory=None, functional=None):
+def find_structure(identifier, basis=None, theory=None, functional=None, code='nwchem'):
     is_calc_query = (basis is not None or theory is not None
                      or functional is not None)
 
@@ -603,7 +616,7 @@ def find_structure(identifier, basis=None, theory=None, functional=None):
             if is_calc_query:
                 # Look for optimization calculation
                 cal = _fetch_calculation(molecule['_id'], 'optimization',
-                                         basis, theory, functional)
+                                         basis, theory, functional, code=code)
 
                 if cal is not None:
                     # TODO We should probably pass in the full calculation
