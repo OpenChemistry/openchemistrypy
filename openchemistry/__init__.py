@@ -75,14 +75,22 @@ def _submit_calculation(cluster_id, pending_calculation_id, optimize, calculatio
         else:
             raise Exception('Unable to submit calculation, no cluster configured.')
 
-    if code == 'nwchem':
-        code_label = 'NWChem (version 27327)'
-        taskflow_class = 'openchemistry.nwchem.NWChemTaskFlow'
-    elif code == 'psi4':
-        code_label = 'PSI4 (version 1.2.1)'
-        taskflow_class = 'openchemistry.psi4.Psi4TaskFlow'
-    else:
+    code_params = {
+        'nwchem': {
+            'label': 'NWChem (version 27327)',
+            'class': 'openchemistry.nwchem.NWChemTaskFlow'
+        },
+        'psi4': {
+            'label': 'PSI4 (version 1.2.1)',
+            'class': 'openchemistry.psi4.Psi4TaskFlow'
+        }
+    }
+
+    if code not in code_params:
         raise Exception('Unable to submit calculation with the %s code' % code)
+
+    code_label = code_params[code]['label']
+    taskflow_class = code_params[code]['class']
 
     # Create the taskflow
     body = {
