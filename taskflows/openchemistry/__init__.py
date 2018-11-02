@@ -65,7 +65,7 @@ class OpenChemistryTaskFlow(TaskFlow, ABC):
         pass
 
     @abstractmethod
-    def copy_output_files(self, filenames):
+    def select_output_files(self, filenames):
         pass
 
     @abstractmethod
@@ -418,7 +418,7 @@ def postprocess_template(task, _, run_folder, input_, cluster, job):
 
     output_items = list(client.listItem(output_folder['_id']))
     output_filenames = [item['name'] for item in output_items]
-    do_copy = task.taskflow.copy_output_files(output_filenames)
+    do_copy = task.taskflow.select_output_files(output_filenames)
     # Call to ingest the files
     for item, copy in zip(output_items, do_copy):
         if copy:

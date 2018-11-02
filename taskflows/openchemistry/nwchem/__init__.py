@@ -14,7 +14,7 @@ class NWChemTaskFlow(OpenChemistryTaskFlow):
                                         trim_blocks=True)
         jinja2_env.get_template('oc.nw.j2').stream(**params, xyz_structure=xyz_structure).dump(tmp_file, encoding='utf8')
 
-    def copy_output_files(self, filenames):
+    def select_output_files(self, filenames):
         do_copy = [False] * len(filenames)
         for i, file in enumerate(filenames):
             if file.endswith('.json'):
