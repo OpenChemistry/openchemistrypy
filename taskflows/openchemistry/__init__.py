@@ -59,29 +59,24 @@ class OpenChemistryTaskFlow(TaskFlow, ABC):
             setup_input_template.s(input_, cluster),
             *args, **kwargs)
 
-    @staticmethod
     @abstractmethod
-    def input_generator(params, tmp_file):
+    def input_generator(self, params, tmp_file):
         pass
 
-    @staticmethod
     @abstractmethod
-    def copy_output_files(filenames):
+    def copy_output_files(self, filenames):
         pass
 
-    @staticmethod
     @abstractmethod
-    def ec2_job_commands(input_name):
+    def ec2_job_commands(self, input_name):
         pass
 
-    @staticmethod
     @abstractmethod
-    def demo_job_commands(input_name):
+    def demo_job_commands(self, input_name):
         pass
 
-    @staticmethod
     @abstractmethod
-    def nersc_job_commands(input_name):
+    def nersc_job_commands(self, input_name):
         pass
 
 def _get_cori(client):
