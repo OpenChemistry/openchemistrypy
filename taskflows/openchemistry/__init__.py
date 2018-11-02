@@ -1,7 +1,5 @@
 from bson.objectid import ObjectId
-import jsonpickle
 import cumulus
-from cumulus.celery import command, monitor
 from cumulus.taskflow import TaskFlow
 from cumulus.taskflow.cluster import create_girder_client
 from cumulus.tasks.job import (download_job_input_folders,
@@ -20,14 +18,6 @@ from io import BytesIO
 import tempfile
 
 from abc import ABC, abstractmethod
-
-command.conf.update(
-    CELERY_TASK_SERIALIZER='jsonpickle'
-)
-
-monitor.conf.update(
-    CELERY_TASK_SERIALIZER='jsonpickle'
-)
 
 class OpenChemistryTaskFlow(TaskFlow, ABC):
     """
@@ -66,7 +56,7 @@ class OpenChemistryTaskFlow(TaskFlow, ABC):
             cluster = model.filter(cluster, user, passphrase=False)
 
         super(OpenChemistryTaskFlow, self).start(
-            setup_input_template.s(input_, cluster, self.__class__),
+            setup_input_template.s(input_, cluster),
             *args, **kwargs)
 
     @staticmethod
@@ -149,7 +139,7 @@ def _fetch_best_geometry(client, molecule_id):
 
 
 @cumulus.taskflow.task
-def setup_input_template(task, input_, cluster, task_class):
+def setup_input_template(task, input_, cluster):
     client = create_girder_client(
         task.taskflow.girder_api_url, task.taskflow.girder_token)
 
@@ -267,24 +257,24 @@ def setup_input_template(task, input_, cluster, task_class):
         params['theory'] = theory[0].value.lower()
 
     with tempfile.TemporaryFile() as fp:
-        task_class.input_generator(params, xyz_structure, fp)
+        task.taskflow.input_generator(params, xyz_structure, fp)
         
         # Get the size of the file
         size = fp.seek(0, 2)
         fp.seek(0)
-        name = task_class.input_name
+        name = task.taskflow.input_name
         input_file = client.uploadFile(input_folder['_id'],  fp, name, size,
                                     parentType='folder')
 
-    submit_template.delay(input_, cluster, run_folder, input_file, input_folder, task_class)
+    submit_template.delay(input_, cluster, run_folder, input_file, input_folder)
 
-def _create_job_ec2(task, cluster, input_file, input_folder, task_class):
-    task.taskflow.logger.info(task_class.logger_name)
+def _create_job_ec2(task, cluster, input_file, input_folder):
+    task.taskflow.logger.info(task.taskflow.logger_name)
     input_name = input_file['name']
 
     body = {
-        'name': task_class.job_name,
-        'commands': task_class.ec2_job_commands(input_name),
+        'name': task.taskflow.job_name,
+        'commands': task.taskflow.ec2_job_commands(input_name),
         'input': [
             {
               'folderId': input_folder['_id'],
@@ -305,13 +295,13 @@ def _create_job_ec2(task, cluster, input_file, input_folder, task_class):
 
     return job
 
-def _create_job_demo(task, cluster, input_file, input_folder, task_class):
-    task.taskflow.logger.info(task_class.logger_name)
+def _create_job_demo(task, cluster, input_file, input_folder):
+    task.taskflow.logger.info(task.taskflow.logger_name)
     input_name = input_file['name']
 
     body = {
-        'name': task_class.job_name,
-        'commands': task_class.demo_job_commands(input_name),
+        'name': task.taskflow.job_name,
+        'commands': task.taskflow.demo_job_commands(input_name),
         'input': [
             {
               'folderId': input_folder['_id'],
@@ -334,13 +324,13 @@ def _create_job_demo(task, cluster, input_file, input_folder, task_class):
 
 
 
-def _create_job_nersc(task, cluster, input_file, input_folder, task_class):
-    task.taskflow.logger.info(task_class.logger_name)
+def _create_job_nersc(task, cluster, input_file, input_folder):
+    task.taskflow.logger.info(task.taskflow.logger_name)
     input_name = input_file['name']
 
     body = {
-        'name': task_class.job_name,
-        'commands': task_class.nersc_job_commands(input_name),
+        'name': task.taskflow.job_name,
+        'commands': task.taskflow.nersc_job_commands(input_name),
         'input': [
             {
               'folderId': input_folder['_id'],
@@ -371,18 +361,18 @@ def _nersc(cluster):
 def _demo(cluster):
     return cluster.get('name') == 'demo_cluster'
 
-def _create_job(task, cluster, input_file, input_folder, task_class):
+def _create_job(task, cluster, input_file, input_folder):
     if _nersc(cluster):
-        return _create_job_nersc(task, cluster, input_file, input_folder, task_class)
+        return _create_job_nersc(task, cluster, input_file, input_folder)
     elif _demo(cluster):
-        return _create_job_demo(task, cluster, input_file, input_folder, task_class)
+        return _create_job_demo(task, cluster, input_file, input_folder)
     else:
-        return _create_job_ec2(task, cluster, input_file, input_folder, task_class)
+        return _create_job_ec2(task, cluster, input_file, input_folder)
 
 
 @cumulus.taskflow.task
-def submit_template(task, input_, cluster, run_folder, input_file, input_folder, task_class):
-    job = _create_job(task, cluster, input_file, input_folder, task_class)
+def submit_template(task, input_, cluster, run_folder, input_file, input_folder):
+    job = _create_job(task, cluster, input_file, input_folder)
 
     girder_token = task.taskflow.girder_token
     task.taskflow.set_metadata('cluster', cluster)
@@ -404,11 +394,11 @@ def submit_template(task, input_, cluster, run_folder, input_file, input_folder,
 
     monitor_job.apply_async((cluster, job), {'girder_token': girder_token,
                                              'monitor_interval': 10},
-                            link=postprocess_template.s(run_folder, input_, cluster, job, task_class))
+                            link=postprocess_template.s(run_folder, input_, cluster, job))
 
 
 @cumulus.taskflow.task
-def postprocess_template(task, _, run_folder, input_, cluster, job, task_class):
+def postprocess_template(task, _, run_folder, input_, cluster, job):
     task.taskflow.logger.info('Uploading results from cluster')
 
     client = create_girder_client(
@@ -432,7 +422,7 @@ def postprocess_template(task, _, run_folder, input_, cluster, job, task_class):
 
     output_items = list(client.listItem(output_folder['_id']))
     output_filenames = [item['name'] for item in output_items]
-    do_copy = task_class.copy_output_files(output_filenames)
+    do_copy = task.taskflow.copy_output_files(output_filenames)
     # Call to ingest the files
     for item, copy in zip(output_items, do_copy):
         if copy:
