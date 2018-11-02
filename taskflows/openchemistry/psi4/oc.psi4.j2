@@ -1,36 +1,10 @@
 molecule {
-  {{charge|default(0)}} {{multiplicity|default(1)}}
+  {{charge}} {{multiplicity}}
   {{xyz_structure}}
 }
 
-{% if optimization is defined %}
-  {% set task = 'optimize' %}
-{% elif vibrational is defined %}
-  {% set task = 'frequency' %}
-{% else %}
-  {% set task = 'energy' %}
-{% endif %}
-
-{% set mult = multiplicity|default(1) %}
-
-{% if theory|lower == 'dft' %}
-  {% set theory_ = functional|default('b3lyp') %}
-  {% if mult == 1 %}
-    {% set reference = 'rks' %}
-  {% else %}
-    {% set reference = 'uks' %}
-  {% endif %}
-{% else %}
-  {% set theory_ = theory|default('scf') %}
-  {% if mult == 1 %}
-    {% set reference = 'rhf' %}
-  {% else %}
-    {% set reference = 'uhf' %}
-  {% endif %}
-{% endif %}
-
-set basis {{basis|default('cc-pvdz')}}
+set basis {{basis}}
 set reference {{reference}}
 set print_basis true
 set print_MOs true
-{{task}}('{{theory_}}')
+{{task}}('{{theory}}')
