@@ -33,10 +33,6 @@ class OpenChemistryTaskFlow(TaskFlow, ABC):
     }
     """
 
-    input_name = 'oc.input'
-    job_name = 'oc_run'
-    logger_name = 'Create OpenChemistry job.'
-
     def start(self, *args, **kwargs):
         user = getCurrentUser()
         input_ = kwargs.get('input')
@@ -58,6 +54,11 @@ class OpenChemistryTaskFlow(TaskFlow, ABC):
         super(OpenChemistryTaskFlow, self).start(
             setup_input_template.s(input_, cluster),
             *args, **kwargs)
+
+    @property
+    @abstractmethod
+    def code_label(self):
+        pass
 
     @abstractmethod
     def input_generator(self, params, tmp_file):
@@ -257,18 +258,18 @@ def setup_input_template(task, input_, cluster):
         # Get the size of the file
         size = fp.seek(0, 2)
         fp.seek(0)
-        name = task.taskflow.input_name
+        name = 'oc.%s.in' % task.taskflow.code_label
         input_file = client.uploadFile(input_folder['_id'],  fp, name, size,
                                     parentType='folder')
 
     submit_template.delay(input_, cluster, run_folder, input_file, input_folder)
 
 def _create_job_ec2(task, cluster, input_file, input_folder):
-    task.taskflow.logger.info(task.taskflow.logger_name)
+    task.taskflow.logger.info('Create %s job' % task.taskflow.code_label)
     input_name = input_file['name']
 
     body = {
-        'name': task.taskflow.job_name,
+        'name': '%s_run' % task.taskflow.code_label,
         'commands': task.taskflow.ec2_job_commands(input_name),
         'input': [
             {
@@ -291,11 +292,11 @@ def _create_job_ec2(task, cluster, input_file, input_folder):
     return job
 
 def _create_job_demo(task, cluster, input_file, input_folder):
-    task.taskflow.logger.info(task.taskflow.logger_name)
+    task.taskflow.logger.info('Create %s job' % task.taskflow.code_label)
     input_name = input_file['name']
 
     body = {
-        'name': task.taskflow.job_name,
+        'name': '%s_run' % task.taskflow.code_label,
         'commands': task.taskflow.demo_job_commands(input_name),
         'input': [
             {
@@ -320,11 +321,11 @@ def _create_job_demo(task, cluster, input_file, input_folder):
 
 
 def _create_job_nersc(task, cluster, input_file, input_folder):
-    task.taskflow.logger.info(task.taskflow.logger_name)
+    task.taskflow.logger.info('Create %s job' % task.taskflow.code_label)
     input_name = input_file['name']
 
     body = {
-        'name': task.taskflow.job_name,
+        'name': '%s_run' % task.taskflow.code_label,
         'commands': task.taskflow.nersc_job_commands(input_name),
         'input': [
             {

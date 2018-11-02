@@ -4,9 +4,9 @@ from openchemistry import OpenChemistryTaskFlow
 
 class NWChemTaskFlow(OpenChemistryTaskFlow):
 
-    input_name = 'oc.nw'
-    job_name = 'nwchem_run'
-    logger_name = 'Create NWChem job.'
+    @property
+    def code_label(self):
+        return 'nwchem'
 
     def input_generator(self, params, xyz_structure, tmp_file):
         template_path = os.path.dirname(__file__)
