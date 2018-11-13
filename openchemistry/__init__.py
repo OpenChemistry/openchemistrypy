@@ -27,7 +27,7 @@ if girder_host:
     elif girder_token is not None:
         girder_client.token = girder_token
 
-girder_file = lookup_file(girder_client, jupyterhub_url)
+    girder_file = lookup_file(girder_client, jupyterhub_url)
 
 # TODO Need to use basis and theory
 def _fetch_calculation(molecule_id, type_=None, basis=None, theory=None, functional=None, code='nwchem'):
