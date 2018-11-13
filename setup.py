@@ -26,7 +26,7 @@ def prerelease_local_scheme(version):
         return get_local_node_and_date(version)
 
 setup(
-    name='openchemistrypy',
+    name='openchemistry',
     use_scm_version={'local_scheme': prerelease_local_scheme},
     setup_requires=['setuptools_scm'],
     description='',
