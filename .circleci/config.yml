@@ -1,0 +1,42 @@
+version: 2
+jobs:
+  release:
+    docker:
+      - image: circleci/python:3.6.1
+
+    steps:
+      - checkout
+      - run:
+          name: create venv
+          command: |
+            python3 -m venv ../venv
+            . ../venv/bin/activate
+      - run:
+          name: install release dependencies
+          command: |
+            . ../venv/bin/activate
+            pip install twine setuptools_scm
+      - run:
+          name: build the project
+          command: |
+            . ../venv/bin/activate
+            python3 setup.py sdist
+      - run:
+          name: release to PyPI
+          command: |
+            . ../venv/bin/activate
+            twine upload dist/*
+
+workflows:
+  version: 2
+  ci:
+    jobs:
+      - release:
+
+          filters:
+            tags:
+              only: /.*?/
+            branches:
+              only:
+                - master
+
