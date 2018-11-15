@@ -3,10 +3,12 @@ from girder_client import GirderClient, HttpError
 import re
 import os
 import urllib.parse
+import json
 import inspect
 from jsonpath_rw import parse
 
 from .utils import lookup_file
+from avogadro import io, core
 
 girder_host = os.environ.get('GIRDER_HOST')
 girder_port = os.environ.get('GIRDER_PORT')
@@ -260,8 +262,23 @@ def _energy(molecule_id, optimize=False, basis=None, theory=None, functional=Non
 
     return calculation
 
-
 class Molecule(object):
+    def __init__(self, cjson):
+        self._cjson = cjson
+
+    @property
+    def structure(self):
+        return Structure(cjson=self._cjson)
+
+    @property
+    def orbitals(self):
+        return Orbitals(self._cjson)
+
+
+class GirderMolecule(Molecule):
+    '''
+    Derived version that allows calculations to be initiated on using Girder
+    '''
     def __init__(self, _id, cjson=None):
         self._id = _id
         self._cjson = cjson
@@ -275,9 +292,6 @@ class Molecule(object):
     def energy(self, optimize=False, basis=None, theory=None, functional=None, code='nwchem'):
         return _energy(self._id, optimize, basis, theory, functional, code=code)
 
-    @property
-    def structure(self):
-        return Structure(cjson=self._cjson)
 
 class Structure(object):
 
@@ -326,15 +340,64 @@ class Frequencies(object):
 
 class Orbitals(object):
 
-    def __init__(self, calculation_result):
-        self._calculation_result = calculation_result
+    def __init__(self, cjson):
+        self._cjson = cjson
+
+    # Default implementation calculate mo locally
+    def _calculate_mo(self, mo):
+        if isinstance(mo, str):
+            mo = mo.lower()
+            if mo.lower() in ['homo', 'lumo']:
+                # Electron count might be saved in several places...
+                path_expressions = [
+                    'orbitals.electronCount',
+                    'basisSet.electronCount',
+                    'properties.electronCount'
+                ]
+                matches = []
+                for expr in path_expressions:
+                    matches.extend(parse(expr).find(self._cjson))
+                if len(matches) > 0:
+                    electron_count = matches[0].value
+                else:
+                    raise Exception('Unable to access electronCount')
+
+                # The index of the first orbital is 0, so homo needs to be
+                # electron_count // 2 - 1
+                if mo.lower() == 'homo':
+                    mo = int(electron_count / 2) - 1
+                elif mo.lower() == 'lumo':
+                    mo = int(electron_count / 2)
+            else:
+                raise ValueError('Unsupported mo: %s' % mo)
+
+        mol = core.Molecule()
+        conv = io.FileFormatManager()
+        conv.readString(mol, json.dumps(self._cjson), 'cjson')
+        # Do some scaling of our spacing based on the size of the molecule.
+        atomCount = mol.atomCount()
+        spacing = 0.30
+        if atomCount > 50:
+            spacing = 0.5
+        elif atomCount > 30:
+            spacing = 0.4
+        elif atomCount > 10:
+            spacing = 0.33
+        cube = mol.addCube()
+        # Hard wiring spacing/padding for now, this could be exposed in future too.
+        cube.setLimits(mol, spacing, 4)
+        gaussian = core.GaussianSetTools(mol)
+        gaussian.calculateMolecularOrbital(cube, mo)
+
+        return json.loads(conv.writeString(mol, "cjson"))['cube']
+
 
     def show(self, mo='homo', iso=None):
         try:
             from jupyterlab_cjson import CJSON
 
-            cjson_copy = self._calculation_result._cjson.copy()
-            cjson_copy['cube'] = self._calculation_result._cube(mo)['cube']
+            cjson_copy = self._cjson.copy()
+            cjson_copy['cube'] = self._calculate_mo(mo)
 
             extra = {}
             if iso:
@@ -348,17 +411,24 @@ class Orbitals(object):
                     'opacity': 0.9
                 }];
 
-            #self._calculation_result._cube(mo)
-
-            # Save parameter to use in url
-            self._last_mo = mo
-            self._last_iso = iso
-
-            return CJSON(cjson_copy, vibrational=False, mo=mo,
-                         calculation_id=self._calculation_result._id, **extra)
+            return CJSON(cjson_copy, vibrational=False, mo=mo, **extra)
         except ImportError:
             # Outside notebook print CJSON
-            print(self._calculation_result._cjson)
+            print(self._cjson)
+
+
+class CalculationResultOrbitals(Orbitals):
+
+    def __init__(self, calculation_result):
+        self._calculation_result = calculation_result
+        super(CalculationResultOrbitals, self).__init__(calculation_result._cjson)
+
+    def show(self, mo='homo', iso=None):
+        # Save parameter to use in url
+        self._last_mo = mo
+        self._last_iso = iso
+
+        return super(CalculationResultOrbitals, self).show(mo, iso)
 
     def url(self):
         url = '%s/calculations/%s' % (app_base_url.rstrip('/'), self._calculation_result._id)
@@ -380,6 +450,10 @@ class Orbitals(object):
         except ImportError:
             # Outside notebook just print the url
             print(url)
+
+    def _calculate_mo(self, mo):
+        return self._calculation_result._cube(mo)['cube']
+
 
 class CalculationResult(object):
 
@@ -415,7 +489,7 @@ class CalculationResult(object):
     @property
     def orbitals(self):
         if self._orbitals is None:
-            self._orbitals = Orbitals(self)
+            self._orbitals = CalculationResultOrbitals(self)
 
         return self._orbitals
 
@@ -607,7 +681,7 @@ def _find_using_cactus(identifier):
     # Just pick the first
     if len(molecule) > 0:
         molecule = molecule[0]
-        return Molecule(molecule['_id'], molecule['cjson'])
+        return GirderMolecule(molecule['_id'], molecule['cjson'])
     else:
         return None
 
@@ -633,7 +707,7 @@ def find_structure(identifier, basis=None, theory=None, functional=None, code='n
                 else:
                     return None
             else:
-                return Molecule(molecule['_id'], molecule['cjson'])
+                return GirderMolecule(molecule['_id'], molecule['cjson'])
         except HttpError as ex:
             if ex.status == 404:
                 # Use cactus to try a lookup the structure
@@ -705,3 +779,7 @@ def show_free_energies(reactions, basis=None, theory=None, functional=None):
     except ImportError:
         # Outside notebook print the data
         print(free_energy_chart_data)
+
+def load(cjson):
+    return Molecule(cjson)
+

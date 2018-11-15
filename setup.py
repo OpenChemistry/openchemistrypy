@@ -47,7 +47,8 @@ setup(
     install_requires=[
         'girder_client>=2.3.0',
         'jinja2',
-        'jsonpath-rw'
+        'jsonpath-rw',
+        'avogadro'
     ],
 
     extras_require={
