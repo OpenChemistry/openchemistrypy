@@ -401,15 +401,7 @@ class Orbitals(object):
 
             extra = {}
             if iso:
-                extra['iso_surfaces'] = [{
-                    'value': iso,
-                    'color': 'blue',
-                    'opacity': 0.9,
-                }, {
-                    'value': -iso,
-                    'color': 'red',
-                    'opacity': 0.9
-                }];
+                extra['iso_value'] = iso
 
             return CJSON(cjson_copy, vibrational=False, mo=mo, **extra)
         except ImportError:
