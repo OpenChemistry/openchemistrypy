@@ -302,7 +302,7 @@ class Structure(object):
     def show(self, style='ball-stick'):
 
         try:
-            from jupyterlab_cjson import CJSON
+            from .notebook import CJSON
             if self._calculation_result:
                 return CJSON(self._calculation_result._cjson, vibrational=False)
             else:
@@ -328,7 +328,7 @@ class Frequencies(object):
 
     def show(self, mode=None, animate_modes=False, spectrum=True):
         try:
-            from jupyterlab_cjson import CJSON
+            from .notebook import CJSON
             return CJSON(self._calculation_result._cjson, structure=animate_modes,
                          animate_mode=mode)
         except ImportError:
@@ -394,7 +394,7 @@ class Orbitals(object):
 
     def show(self, mo='homo', iso=None):
         try:
-            from jupyterlab_cjson import CJSON
+            from .notebook import CJSON
 
             cjson_copy = self._cjson.copy()
             cjson_copy['cube'] = self._calculate_mo(mo)
@@ -542,7 +542,7 @@ class AttributeInterceptor(object):
 class PendingCalculationResultWrapper(AttributeInterceptor):
     def __init__(self, calculation, taskflow_id=None):
         try:
-            from jupyterlab_cjson import CalculationMonitor
+            from .notebook import CalculationMonitor
             if taskflow_id is None:
                 taskflow_id = calculation.properties['taskFlowId']
 
@@ -761,7 +761,7 @@ def show_free_energies(reactions, basis=None, theory=None, functional=None):
         taskflow_ids = list(set(taskflow_ids))
 
         try:
-            from jupyterlab_cjson import CalculationMonitor
+            from .notebook import CalculationMonitor
             table = CalculationMonitor({
                     'taskFlowIds': taskflow_ids,
                     'girderToken': girder_client.token
@@ -773,7 +773,7 @@ def show_free_energies(reactions, basis=None, theory=None, functional=None):
         return table;
 
     try:
-        from jupyterlab_cjson import FreeEnergy
+        from .notebook import FreeEnergy
 
         return FreeEnergy(free_energy_chart_data)
     except ImportError:
