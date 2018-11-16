@@ -4,7 +4,7 @@ from IPython.display import display, JSON, DisplayObject
 #   from openchemistry.notebook import CJSON
 #   CJSON(data)
 
-DEFAULT_ISO = 43 / 2000.0;
+DEFAULT_ISO = 0.05;
 DEFAULT_ISO_SURFACES = [{
     'value': DEFAULT_ISO,
     'color': 'blue',
@@ -25,10 +25,11 @@ class CJSON(JSON):
 
     def __init__(self, data=None, url=None, filename=None, vibrational=True, structure=True,
                  iso_surfaces=DEFAULT_ISO_SURFACES, animate_mode=None, calculation_id=None,
-                 mo=None):
+                 iso_value=DEFAULT_ISO, mo=None):
         super(CJSON, self).__init__(data, url, filename)
         self.metadata['vibrational'] = vibrational
         self.metadata['structure'] = structure
+        self.metadata['isoValue'] = iso_value
         self.metadata['isoSurfaces'] = iso_surfaces
         self.metadata['animateMode'] = animate_mode
         self.metadata['mo'] = mo
