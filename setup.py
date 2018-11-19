@@ -48,7 +48,12 @@ setup(
         'girder_client>=2.3.0',
         'jinja2',
         'jsonpath-rw',
-        'avogadro'
+        'avogadro',
+        'cclib==1.6.1'
+    ],
+
+    dependency_links=[
+        'git+ssh://git@github.com/cclib/cclib.git#egg=cclib-1.6.1'
     ],
 
     extras_require={
