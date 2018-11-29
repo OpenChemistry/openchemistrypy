@@ -1,6 +1,7 @@
 import os
 import jinja2
 from openchemistry import OpenChemistryTaskFlow
+from openchemistry.utils import cjson_to_xyz
 
 class Psi4TaskFlow(OpenChemistryTaskFlow):
 
@@ -8,7 +9,9 @@ class Psi4TaskFlow(OpenChemistryTaskFlow):
     def code_label(self):
         return 'psi4'
 
-    def input_generator(self, params, xyz_structure, tmp_file):
+    def input_generator(self, params, cjson, tmp_file):
+        xyz_structure = cjson_to_xyz(cjson)
+
         optimization = params.get('optimization', None)
         vibrational = params.get('vibrational', None)
         charge = params.get('charge', 0)

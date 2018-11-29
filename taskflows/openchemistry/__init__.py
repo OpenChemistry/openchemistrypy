@@ -61,7 +61,7 @@ class OpenChemistryTaskFlow(TaskFlow, ABC):
         pass
 
     @abstractmethod
-    def input_generator(self, params, tmp_file):
+    def input_generator(self, params, cjson, tmp_file):
         pass
 
     @abstractmethod
@@ -189,27 +189,22 @@ def setup_input_template(task, input_, cluster):
 
     # We are using a specific one
     if optimization_calculation_id is not None:
-        r = client.get('calculations/%s/xyz' % optimization_calculation_id,
+        r = client.get('calculations/%s/cjson' % optimization_calculation_id,
                     jsonResp=False)
-        xyz = r.text
+        cjson = r.json
     # If we have not calculations then just use the geometry stored in molecules
     elif best_calc is None:
-        r = client.get('molecules/%s/xyz' % molecule_id, jsonResp=False)
-        xyz = r.text
+        r = client.get('molecules/%s/cjson' % molecule_id, jsonResp=False)
+        cjson = r.json
         # As we might be using an unoptimized structure add the optimize step
         if 'optimization' not in calculation['properties']['calculationTypes']:
             calculation['properties']['calculationTypes'].append('optimization')
     # Fetch xyz for best geometry
     else:
         optimization_calculation_id = best_calc['_id']
-        r = client.get('calculations/%s/xyz' % optimization_calculation_id,
+        r = client.get('calculations/%s/cjson' % optimization_calculation_id,
                     jsonResp=False)
-        xyz = r.text
-
-    # remove the first two lines in the xyz file
-    # (i.e. number of atom and optional comment)
-    xyz_structure = xyz.split('\n')[2:]
-    xyz_structure = '\n  '.join(xyz_structure)
+        cjson = r.json
 
     # If we are using an existing calculation as the input geometry record it
     if optimization_calculation_id is not None:
@@ -253,7 +248,7 @@ def setup_input_template(task, input_, cluster):
         params['theory'] = theory[0].value.lower()
 
     with tempfile.TemporaryFile() as fp:
-        task.taskflow.input_generator(params, xyz_structure, fp)
+        task.taskflow.input_generator(params, cjson, fp)
         
         # Get the size of the file
         size = fp.seek(0, 2)

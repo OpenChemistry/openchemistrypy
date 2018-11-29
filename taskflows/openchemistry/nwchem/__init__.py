@@ -1,6 +1,7 @@
 import os
 import jinja2
 from openchemistry import OpenChemistryTaskFlow
+from openchemistry.utils import cjson_to_xyz
 
 class NWChemTaskFlow(OpenChemistryTaskFlow):
 
@@ -8,7 +9,8 @@ class NWChemTaskFlow(OpenChemistryTaskFlow):
     def code_label(self):
         return 'nwchem'
 
-    def input_generator(self, params, xyz_structure, tmp_file):
+    def input_generator(self, params, cjson, tmp_file):
+        xyz_structure = cjson_to_xyz(cjson)
         template_path = os.path.dirname(__file__)
         jinja2_env = jinja2.Environment(loader=jinja2.FileSystemLoader(template_path),
                                         trim_blocks=True)
