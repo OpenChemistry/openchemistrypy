@@ -85,6 +85,10 @@ def _submit_calculation(cluster_id, pending_calculation_id, optimize, calculatio
         'psi4': {
             'label': 'PSI4 (version 1.2.1)',
             'class': 'openchemistry.psi4.Psi4TaskFlow'
+        },
+        'chemml': {
+            'label': 'ChemML',
+            'class': 'openchemistry.chemml.ChemmlTaskFlow'
         }
     }
 
