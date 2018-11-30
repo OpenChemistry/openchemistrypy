@@ -1,6 +1,6 @@
 import os
+import json
 from openchemistry import OpenChemistryTaskFlow
-from openchemistry.utils import cjson_to_smiles
 
 class ChemmlTaskFlow(OpenChemistryTaskFlow):
 
@@ -9,8 +9,7 @@ class ChemmlTaskFlow(OpenChemistryTaskFlow):
         return 'chemml'
 
     def input_generator(self, params, cjson, tmp_file):
-        smiles = cjson_to_smiles(cjson)
-        tmp_file.write(smiles)
+        json.dump(cjson, tmp_file)
 
     def select_output_files(self, filenames):
         do_copy = [False] * len(filenames)
