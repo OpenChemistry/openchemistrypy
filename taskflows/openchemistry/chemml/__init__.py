@@ -19,17 +19,19 @@ class ChemmlTaskFlow(OpenChemistryTaskFlow):
         return do_copy
 
     def ec2_job_commands(self, input_name):
+        mount_dir = '/data/'
         return [
             'docker pull openchemistry/chemml:latest',
-            'docker run --rm -v $(pwd):/data openchemistry/chemml:latest %s' % (
-                input_name)
+            'docker run --rm -v dev_job_data:%s openchemistry/chemml:latest %s' % (
+                mount_dir, mount_dir + input_name)
         ]
 
     def demo_job_commands(self, input_name):
+        mount_dir = '/data/'
         return [
             'docker pull openchemistry/chemml:latest',
-            'docker run --rm -w $(pwd) -v dev_job_data:/data openchemistry/chemml:latest %s' % (
-                input_name)
+            'docker run --rm -v dev_job_data:%s openchemistry/chemml:latest %s' % (
+                mount_dir, mount_dir + input_name)
         ]
 
     def nersc_job_commands(self, input_name):
