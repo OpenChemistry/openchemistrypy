@@ -27,6 +27,18 @@ class NWChemTaskFlow(OpenChemistryTaskFlow):
                 do_copy[i] = True
         return do_copy
 
+    def demo_job_commands(self, input_name):
+        mount_dir = '/data'
+        return [
+            'docker pull %s' % self.docker_image,
+            'docker run -w %s -v dev_job_data:%s %s %s' % (
+                os.path.join(mount_dir, '{{job._id}}'),
+                mount_dir,
+                self.docker_image,
+                input_name
+            )
+        ]
+
     def nersc_job_commands(self, input_name):
         return [
             '/usr/bin/srun -N 1  -n 32 %s %s' % (os.environ.get('OC_NWCHEM_PATH', 'nwchem'), input_name)
