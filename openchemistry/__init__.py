@@ -483,11 +483,12 @@ class Properties(object):
     def show(self):
 
         try:
-            from .notebook import PropertiesTable
+            from IPython.display import Markdown
             if self._calculation_result:
-                return PropertiesTable(self._calculation_result._cjson)
+                table = self._properties_table(self._calculation_result._cjson)
             else:
-                return PropertiesTable(self._cjson)
+                table = self._properties_table(self._cjson)
+            return Markdown(table)
         except ImportError:
             # Outside notebook print CJSON
             print(self._calculation_result._cjson)
@@ -500,6 +501,27 @@ class Properties(object):
         except ImportError:
             # Outside notebook just print the url
             print(url)
+
+    def _properties_table(self, cjson):
+        import math
+        table = '''### Calculated Properties
+| Name | Value | Units |
+|------|-------|-------|'''
+        properties = cjson.get('calculatedProperties', {})
+
+        for prop in properties.values():
+            value = prop.get('value', math.nan)
+            try:
+                value = float(value)
+            except ValueError:
+                value = math.nan
+            table += '\n| %s | %.2f | %s |' % (
+                prop.get('label', ''),
+                value,
+                prop.get('units', '')
+            )
+
+        return table
 
 
 class CalculationResult(object):
