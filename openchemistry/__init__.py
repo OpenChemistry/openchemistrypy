@@ -143,7 +143,7 @@ def _fetch_taskflow_status(taskflow_id):
 
     return r['status']
 
-def _create_pending_calculation(molecule_id, type_, basis, theory, functional=None,
+def _create_pending_calculation(molecule_id, type_, basis=None, theory=None, functional=None,
                                 input_geometry=None, code='nwchem'):
     if not isinstance(type_, list):
         type_ = [type_]
@@ -154,15 +154,19 @@ def _create_pending_calculation(molecule_id, type_, basis, theory, functional=No
         'public': True,
         'properties': {
             'calculationTypes': type_,
-            'basisSet': {
-                'name': basis.lower()
-            },
-            'theory': theory.lower(),
             'pending': True,
             'code': code
         },
         'notebooks': [girder_file['_id']]
     }
+
+    if basis is not None:
+        body['properties']['basisSet'] = {
+            'name': basis.lower()
+        }
+
+    if theory is not None:
+        body['properties']['theory'] = theory.lower()
 
     if input_geometry is not None:
         body['properties']['input'] = {
@@ -176,7 +180,7 @@ def _create_pending_calculation(molecule_id, type_, basis, theory, functional=No
 
     return calculation
 
-def _fetch_or_submit_calculation(molecule_id, type_, basis, theory, functional=None, optimize=False,
+def _fetch_or_submit_calculation(molecule_id, type_, basis=None, theory=None, functional=None, optimize=False,
                                  input_geometry=None, code='nwchem'):
     global cluster_id
     # If a functional has been provided default theory to dft
@@ -266,6 +270,25 @@ def _energy(molecule_id, optimize=False, basis=None, theory=None, functional=Non
 
     return calculation
 
+def _predict(molecule_id, code='chemml'):
+    type_ = 'machine_learning'
+    calculation = _fetch_or_submit_calculation(molecule_id, type_, code=code)
+    pending = parse('properties.pending').find(calculation)
+    if pending:
+        pending = pending[0].value
+
+    taskflow_id = parse('properties.taskFlowId').find(calculation)
+    if taskflow_id:
+        taskflow_id = taskflow_id[0].value
+    else:
+        taskflow_id = None
+    calculation = CalculationResult(calculation['_id'], calculation['properties'], molecule_id)
+
+    if pending:
+        calculation = PendingCalculationResultWrapper(calculation, taskflow_id)
+
+    return calculation
+
 class Molecule(object):
     def __init__(self, cjson):
         self._cjson = cjson
@@ -277,6 +300,10 @@ class Molecule(object):
     @property
     def orbitals(self):
         return Orbitals(self._cjson)
+
+    @property
+    def properties(self):
+        pass
 
 
 class GirderMolecule(Molecule):
@@ -296,6 +323,8 @@ class GirderMolecule(Molecule):
     def energy(self, optimize=False, basis=None, theory=None, functional=None, code='nwchem'):
         return _energy(self._id, optimize, basis, theory, functional, code=code)
 
+    def predict(self, code='chemml'):
+        return _predict(self._id, code=code)
 
 class Structure(object):
 
