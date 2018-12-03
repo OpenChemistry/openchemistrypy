@@ -301,11 +301,6 @@ class Molecule(object):
     def orbitals(self):
         return Orbitals(self._cjson)
 
-    @property
-    def properties(self):
-        pass
-
-
 class GirderMolecule(Molecule):
     '''
     Derived version that allows calculations to be initiated on using Girder
@@ -479,6 +474,33 @@ class CalculationResultOrbitals(Orbitals):
     def _calculate_mo(self, mo):
         return self._calculation_result._cube(mo)['cube']
 
+class Properties(object):
+
+    def __init__(self, calculation_result=None, cjson=None):
+        self._calculation_result = calculation_result
+        self._cjson = cjson
+
+    def show(self):
+
+        try:
+            from .notebook import PropertiesTable
+            if self._calculation_result:
+                return PropertiesTable(self._calculation_result._cjson)
+            else:
+                return PropertiesTable(self._cjson)
+        except ImportError:
+            # Outside notebook print CJSON
+            print(self._calculation_result._cjson)
+
+    def url(self, style='ball-stick'):
+        url = '%s/calculations/%s' % (app_base_url.rstrip('/'), self._calculation_result._id)
+        try:
+            from IPython.display import Markdown
+            return Markdown('[%s](%s)' % (url, url))
+        except ImportError:
+            # Outside notebook just print the url
+            print(url)
+
 
 class CalculationResult(object):
 
@@ -488,7 +510,7 @@ class CalculationResult(object):
         self._vibrational_modes_ = None
         self._orbitals = None
         self._molecule_id = molecule_id
-        self.properties = properties
+        self._properties = properties
 
     @property
     def _cjson(self):
@@ -517,6 +539,11 @@ class CalculationResult(object):
             self._orbitals = CalculationResultOrbitals(self)
 
         return self._orbitals
+
+    @property
+    def properties(self):
+        return Properties(self)
+
 
     def optimize(self, basis=None, theory=None, functional=None):
         return _optimize(self._molecule_id, basis, theory, functional, self._id)
