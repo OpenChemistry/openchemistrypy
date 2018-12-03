@@ -9,6 +9,10 @@ class NWChemTaskFlow(OpenChemistryTaskFlow):
     def code_label(self):
         return 'nwchem'
 
+    @property
+    def docker_image(self):
+        return 'openchemistry/nwchem-json:latest'
+
     def input_generator(self, params, cjson, tmp_file):
         xyz_structure = cjson_to_xyz(cjson)
         template_path = os.path.dirname(__file__)
@@ -22,20 +26,6 @@ class NWChemTaskFlow(OpenChemistryTaskFlow):
             if file.endswith('.json'):
                 do_copy[i] = True
         return do_copy
-
-    def ec2_job_commands(self, input_name):
-        return [
-            'docker pull openchemistry/nwchem-json:latest',
-            'docker run --rm -v $(pwd):/data openchemistry/nwchem-json:latest %s' % (
-                input_name)
-        ]
-
-    def demo_job_commands(self, input_name):
-        return [
-            'docker pull openchemistry/nwchem-json:latest',
-            'docker run --rm -w $(pwd) -v dev_job_data:/data openchemistry/nwchem-json:latest %s' % (
-                input_name)
-        ]
 
     def nersc_job_commands(self, input_name):
         return [

@@ -60,6 +60,11 @@ class OpenChemistryTaskFlow(TaskFlow, ABC):
     def code_label(self):
         pass
 
+    @property
+    @abstractmethod
+    def docker_image(self):
+        pass
+
     @abstractmethod
     def input_generator(self, params, cjson, tmp_file):
         pass
@@ -68,17 +73,22 @@ class OpenChemistryTaskFlow(TaskFlow, ABC):
     def select_output_files(self, filenames):
         pass
 
-    @abstractmethod
     def ec2_job_commands(self, input_name):
-        pass
+        return self.demo_job_commands(input_name)
 
-    @abstractmethod
     def demo_job_commands(self, input_name):
-        pass
+        mount_dir = '/data'
+        return [
+            'docker pull %s' % self.docker_image,
+            'docker run -v dev_job_data:%s %s %s' % (
+                mount_dir,
+                self.docker_image,
+                os.path.join(mount_dir, '{{job._id}}', input_name)
+            )
+        ]
 
-    @abstractmethod
     def nersc_job_commands(self, input_name):
-        pass
+        raise NotImplementedError('%s has not been configured to run on NERSC yet.' % self.code_label)
 
 def _get_cori(client):
     params = {
@@ -191,11 +201,11 @@ def setup_input_template(task, input_, cluster):
     if optimization_calculation_id is not None:
         r = client.get('calculations/%s/cjson' % optimization_calculation_id,
                     jsonResp=False)
-        cjson = r.json
+        cjson = r.json()
     # If we have not calculations then just use the geometry stored in molecules
     elif best_calc is None:
         r = client.get('molecules/%s/cjson' % molecule_id, jsonResp=False)
-        cjson = r.json
+        cjson = r.json()
         # As we might be using an unoptimized structure add the optimize step
         if 'optimization' not in calculation['properties']['calculationTypes']:
             calculation['properties']['calculationTypes'].append('optimization')
@@ -204,7 +214,7 @@ def setup_input_template(task, input_, cluster):
         optimization_calculation_id = best_calc['_id']
         r = client.get('calculations/%s/cjson' % optimization_calculation_id,
                     jsonResp=False)
-        cjson = r.json
+        cjson = r.json()
 
     # If we are using an existing calculation as the input geometry record it
     if optimization_calculation_id is not None:

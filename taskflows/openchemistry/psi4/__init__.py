@@ -9,6 +9,10 @@ class Psi4TaskFlow(OpenChemistryTaskFlow):
     def code_label(self):
         return 'psi4'
 
+    @property
+    def docker_image(self):
+        return 'openchemistry/psi4:latest'
+
     def input_generator(self, params, cjson, tmp_file):
         xyz_structure = cjson_to_xyz(cjson)
 
@@ -59,20 +63,3 @@ class Psi4TaskFlow(OpenChemistryTaskFlow):
             if file.endswith('.out'):
                 do_copy[i] = True
         return do_copy
-
-    def ec2_job_commands(self, input_name):
-        return [
-            'docker pull openchemistry/psi4:latest',
-            'docker run --rm -v $(pwd):/data openchemistry/psi4:latest %s' % (
-                input_name)
-        ]
-
-    def demo_job_commands(self, input_name):
-        return [
-            'docker pull openchemistry/psi4:latest',
-            'docker run --rm -w $(pwd) -v dev_job_data:/data openchemistry/psi4:latest %s' % (
-                input_name)
-        ]
-
-    def nersc_job_commands(self, input_name):
-        raise NotImplementedError('PSI4 has not been configured to run on NERSC yet.')
