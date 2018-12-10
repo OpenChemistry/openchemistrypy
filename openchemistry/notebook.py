@@ -92,21 +92,3 @@ class CalculationMonitor(DisplayObject):
 
     def __call__(self):
         return self
-
-class PropertiesTable(DisplayObject):
-    """
-    A display class for showing the calculated properties in a cjson document.
-    """
-    def __init__(self, data=None, url=None, filename=None, calculation_id=None):
-        super(PropertiesTable, self).__init__(data, url, filename)
-        self.metadata['calculationId'] = calculation_id
-
-    def _ipython_display_(self):
-        bundle = {
-            'application/vnd.oc.cjson.properties+json': self.data,
-            'text/plain': '<jupyterlab_cjson.PropertiesTable object>'
-        }
-        metadata = {
-            'application/vnd.oc.cjson.properties+json': self.metadata
-        }
-        display(bundle, metadata=metadata, raw=True)
