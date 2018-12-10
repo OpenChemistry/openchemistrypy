@@ -49,7 +49,7 @@ setup(
         'jinja2',
         'jsonpath-rw',
         'avogadro',
-        'cclib==1.6.1'
+        'cclib==1.6.1',
         'IPython',
         'ipykernel'
     ],
