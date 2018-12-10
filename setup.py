@@ -50,6 +50,8 @@ setup(
         'jsonpath-rw',
         'avogadro',
         'cclib==1.6.1'
+        'IPython',
+        'ipykernel'
     ],
 
     dependency_links=[
