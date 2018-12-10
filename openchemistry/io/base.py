@@ -2,16 +2,21 @@ from abc import ABC, abstractmethod
 
 class BaseReader(ABC):
 
-    @staticmethod
-    @abstractmethod
-    def read(f):
+    def __init__(self, f):
         """
-        Converts an output file to CJSON
+        Instantiate an OpenChemistry Reader
 
         Parameters
         ----------
         f : file-like object
             A quantum chemistry output file
+        """
+        self._file = f
+
+    @abstractmethod
+    def read(self):
+        """
+        Converts an output file to CJSON
 
         Returns
         -------

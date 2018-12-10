@@ -6,9 +6,9 @@ from .utils import _cclib_to_cjson_basis, _cclib_to_cjson_mocoeffs, _cclib_to_cj
 from .base import BaseReader
 
 class Psi4Reader(BaseReader):
-    @staticmethod
-    def read(f):
-        data = cclib.io.ccread(f)    
+
+    def read(self):
+        data = cclib.io.ccread(self._file)
         cjson = json.loads(cclib.ccwrite(data, outputtype='cjson',))
 
         # The cjson produced by cclib is not directly usable in our platform

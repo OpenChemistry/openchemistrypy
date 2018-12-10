@@ -5,9 +5,8 @@ from .base import BaseReader
 
 class NWChemJsonReader(BaseReader):
 
-    @staticmethod
-    def read(f):
-        str_data = f.read()
+    def read(self):
+        str_data = self._file.read()
         mol = Molecule()
         conv = FileFormatManager()
         conv.readString(mol, str_data, 'json')
