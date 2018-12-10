@@ -1,5 +1,5 @@
 import os
-from setuptools import setup
+from setuptools import setup, find_packages
 from codecs import open
 from os import path
 
@@ -42,7 +42,7 @@ setup(
 
     keywords='',
 
-    packages=['openchemistry'],
+    packages=find_packages(exclude='taskflows'),
 
     install_requires=[
         'girder_client>=2.3.0',
