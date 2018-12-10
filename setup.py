@@ -1,5 +1,5 @@
 import os
-from setuptools import setup
+from setuptools import setup, find_packages
 from codecs import open
 from os import path
 
@@ -42,20 +42,20 @@ setup(
 
     keywords='',
 
-    packages=['openchemistry'],
+    packages=find_packages(exclude='taskflows'),
 
     install_requires=[
         'girder_client>=2.3.0',
         'jinja2',
         'jsonpath-rw',
         'avogadro',
-        'cclib==1.6.1',
+        'cclib',
         'IPython',
         'ipykernel'
     ],
 
     dependency_links=[
-        'git+ssh://git@github.com/cclib/cclib.git#egg=cclib-1.6.1'
+        'git+ssh://git@github.com/cclib/cclib.git#egg=cclib'
     ],
 
     extras_require={
