@@ -404,23 +404,23 @@ class Orbitals(object):
 
         mol = core.Molecule()
         conv = avo_io.FileFormatManager()
-        conv.readString(mol, json.dumps(self._cjson), 'cjson')
+        conv.read_string(mol, json.dumps(self._cjson), 'cjson')
         # Do some scaling of our spacing based on the size of the molecule.
-        atomCount = mol.atomCount()
+        atom_count = mol.atom_count()
         spacing = 0.30
-        if atomCount > 50:
+        if atom_count > 50:
             spacing = 0.5
-        elif atomCount > 30:
+        elif atom_count > 30:
             spacing = 0.4
-        elif atomCount > 10:
+        elif atom_count > 10:
             spacing = 0.33
-        cube = mol.addCube()
+        cube = mol.add_cube()
         # Hard wiring spacing/padding for now, this could be exposed in future too.
-        cube.setLimits(mol, spacing, 4)
+        cube.set_limits(mol, spacing, 4)
         gaussian = core.GaussianSetTools(mol)
-        gaussian.calculateMolecularOrbital(cube, mo)
+        gaussian.calculate_molecular_orbital(cube, mo)
 
-        return json.loads(conv.writeString(mol, "cjson"))['cube']
+        return json.loads(conv.write_string(mol, "cjson"))['cube']
 
 
     def show(self, mo='homo', iso=None):

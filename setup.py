@@ -48,7 +48,7 @@ setup(
         'girder_client>=2.3.0',
         'jinja2',
         'jsonpath-rw',
-        'avogadro',
+        'avogadro>=1.92.1',
         'cclib',
         'IPython',
         'ipykernel'
