@@ -49,8 +49,13 @@ setup(
         'jinja2',
         'jsonpath-rw',
         'avogadro',
+        'cclib==1.6.1'
         'IPython',
         'ipykernel'
+    ],
+
+    dependency_links=[
+        'git+ssh://git@github.com/cclib/cclib.git#egg=cclib-1.6.1'
     ],
 
     extras_require={

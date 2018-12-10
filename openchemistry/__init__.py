@@ -8,7 +8,10 @@ import inspect
 from jsonpath_rw import parse
 
 from .utils import lookup_file
-from avogadro import io, core
+from avogadro import io as avo_io, core
+
+from .io.psi4 import Psi4Reader
+from .io.nwchemJson import NWChemJsonReader
 
 girder_host = os.environ.get('GIRDER_HOST')
 girder_port = os.environ.get('GIRDER_PORT')
@@ -400,7 +403,7 @@ class Orbitals(object):
                 raise ValueError('Unsupported mo: %s' % mo)
 
         mol = core.Molecule()
-        conv = io.FileFormatManager()
+        conv = avo_io.FileFormatManager()
         conv.readString(mol, json.dumps(self._cjson), 'cjson')
         # Do some scaling of our spacing based on the size of the molecule.
         atomCount = mol.atomCount()
