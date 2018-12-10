@@ -85,6 +85,10 @@ def _submit_calculation(cluster_id, pending_calculation_id, optimize, calculatio
         'psi4': {
             'label': 'PSI4 (version 1.2.1)',
             'class': 'openchemistry.psi4.Psi4TaskFlow'
+        },
+        'chemml': {
+            'label': 'ChemML',
+            'class': 'openchemistry.chemml.ChemmlTaskFlow'
         }
     }
 
@@ -139,7 +143,7 @@ def _fetch_taskflow_status(taskflow_id):
 
     return r['status']
 
-def _create_pending_calculation(molecule_id, type_, basis, theory, functional=None,
+def _create_pending_calculation(molecule_id, type_, basis=None, theory=None, functional=None,
                                 input_geometry=None, code='nwchem'):
     if not isinstance(type_, list):
         type_ = [type_]
@@ -150,15 +154,19 @@ def _create_pending_calculation(molecule_id, type_, basis, theory, functional=No
         'public': True,
         'properties': {
             'calculationTypes': type_,
-            'basisSet': {
-                'name': basis.lower()
-            },
-            'theory': theory.lower(),
             'pending': True,
             'code': code
         },
         'notebooks': [girder_file['_id']]
     }
+
+    if basis is not None:
+        body['properties']['basisSet'] = {
+            'name': basis.lower()
+        }
+
+    if theory is not None:
+        body['properties']['theory'] = theory.lower()
 
     if input_geometry is not None:
         body['properties']['input'] = {
@@ -172,7 +180,7 @@ def _create_pending_calculation(molecule_id, type_, basis, theory, functional=No
 
     return calculation
 
-def _fetch_or_submit_calculation(molecule_id, type_, basis, theory, functional=None, optimize=False,
+def _fetch_or_submit_calculation(molecule_id, type_, basis=None, theory=None, functional=None, optimize=False,
                                  input_geometry=None, code='nwchem'):
     global cluster_id
     # If a functional has been provided default theory to dft
@@ -262,6 +270,25 @@ def _energy(molecule_id, optimize=False, basis=None, theory=None, functional=Non
 
     return calculation
 
+def _predict(molecule_id, code='chemml'):
+    type_ = 'machine_learning'
+    calculation = _fetch_or_submit_calculation(molecule_id, type_, code=code)
+    pending = parse('properties.pending').find(calculation)
+    if pending:
+        pending = pending[0].value
+
+    taskflow_id = parse('properties.taskFlowId').find(calculation)
+    if taskflow_id:
+        taskflow_id = taskflow_id[0].value
+    else:
+        taskflow_id = None
+    calculation = CalculationResult(calculation['_id'], calculation['properties'], molecule_id)
+
+    if pending:
+        calculation = PendingCalculationResultWrapper(calculation, taskflow_id)
+
+    return calculation
+
 class Molecule(object):
     def __init__(self, cjson):
         self._cjson = cjson
@@ -273,7 +300,6 @@ class Molecule(object):
     @property
     def orbitals(self):
         return Orbitals(self._cjson)
-
 
 class GirderMolecule(Molecule):
     '''
@@ -292,6 +318,8 @@ class GirderMolecule(Molecule):
     def energy(self, optimize=False, basis=None, theory=None, functional=None, code='nwchem'):
         return _energy(self._id, optimize, basis, theory, functional, code=code)
 
+    def predict(self, code='chemml'):
+        return _predict(self._id, code=code)
 
 class Structure(object):
 
@@ -446,6 +474,55 @@ class CalculationResultOrbitals(Orbitals):
     def _calculate_mo(self, mo):
         return self._calculation_result._cube(mo)['cube']
 
+class Properties(object):
+
+    def __init__(self, calculation_result=None, cjson=None):
+        self._calculation_result = calculation_result
+        self._cjson = cjson
+
+    def show(self):
+
+        try:
+            from IPython.display import Markdown
+            if self._calculation_result:
+                table = self._properties_table(self._calculation_result._cjson)
+            else:
+                table = self._properties_table(self._cjson)
+            return Markdown(table)
+        except ImportError:
+            # Outside notebook print CJSON
+            print(self._calculation_result._cjson)
+
+    def url(self, style='ball-stick'):
+        url = '%s/calculations/%s' % (app_base_url.rstrip('/'), self._calculation_result._id)
+        try:
+            from IPython.display import Markdown
+            return Markdown('[%s](%s)' % (url, url))
+        except ImportError:
+            # Outside notebook just print the url
+            print(url)
+
+    def _properties_table(self, cjson):
+        import math
+        table = '''### Calculated Properties
+| Name | Value | Units |
+|------|-------|-------|'''
+        properties = cjson.get('calculatedProperties', {})
+
+        for prop in properties.values():
+            value = prop.get('value', math.nan)
+            try:
+                value = float(value)
+            except ValueError:
+                value = math.nan
+            table += '\n| %s | %.2f | %s |' % (
+                prop.get('label', ''),
+                value,
+                prop.get('units', '')
+            )
+
+        return table
+
 
 class CalculationResult(object):
 
@@ -455,7 +532,7 @@ class CalculationResult(object):
         self._vibrational_modes_ = None
         self._orbitals = None
         self._molecule_id = molecule_id
-        self.properties = properties
+        self._properties = properties
 
     @property
     def _cjson(self):
@@ -484,6 +561,11 @@ class CalculationResult(object):
             self._orbitals = CalculationResultOrbitals(self)
 
         return self._orbitals
+
+    @property
+    def properties(self):
+        return Properties(self)
+
 
     def optimize(self, basis=None, theory=None, functional=None):
         return _optimize(self._molecule_id, basis, theory, functional, self._id)

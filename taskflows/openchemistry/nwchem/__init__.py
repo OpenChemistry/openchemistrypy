@@ -1,6 +1,7 @@
 import os
 import jinja2
 from openchemistry import OpenChemistryTaskFlow
+from openchemistry.utils import cjson_to_xyz
 
 class NWChemTaskFlow(OpenChemistryTaskFlow):
 
@@ -8,7 +9,12 @@ class NWChemTaskFlow(OpenChemistryTaskFlow):
     def code_label(self):
         return 'nwchem'
 
-    def input_generator(self, params, xyz_structure, tmp_file):
+    @property
+    def docker_image(self):
+        return 'openchemistry/nwchem-json:latest'
+
+    def input_generator(self, params, cjson, tmp_file):
+        xyz_structure = cjson_to_xyz(cjson)
         template_path = os.path.dirname(__file__)
         jinja2_env = jinja2.Environment(loader=jinja2.FileSystemLoader(template_path),
                                         trim_blocks=True)
@@ -21,18 +27,16 @@ class NWChemTaskFlow(OpenChemistryTaskFlow):
                 do_copy[i] = True
         return do_copy
 
-    def ec2_job_commands(self, input_name):
-        return [
-            'docker pull openchemistry/nwchem-json:latest',
-            'docker run --rm -v $(pwd):/data openchemistry/nwchem-json:latest %s' % (
-                input_name)
-        ]
-
     def demo_job_commands(self, input_name):
+        mount_dir = '/data'
         return [
-            'docker pull openchemistry/nwchem-json:latest',
-            'docker run --rm -w $(pwd) -v dev_job_data:/data openchemistry/nwchem-json:latest %s' % (
-                input_name)
+            'docker pull %s' % self.docker_image,
+            'docker run -w %s -v dev_job_data:%s %s %s' % (
+                os.path.join(mount_dir, '{{job._id}}'),
+                mount_dir,
+                self.docker_image,
+                input_name
+            )
         ]
 
     def nersc_job_commands(self, input_name):
