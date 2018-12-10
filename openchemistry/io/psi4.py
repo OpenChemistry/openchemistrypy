@@ -1,4 +1,3 @@
-import cclib
 import json
 
 from .utils import _cclib_to_cjson_basis, _cclib_to_cjson_mocoeffs, _cclib_to_cjson_vibdisps
@@ -8,6 +7,8 @@ from .base import BaseReader
 class Psi4Reader(BaseReader):
 
     def read(self):
+        import cclib
+
         data = cclib.io.ccread(self._file)
         cjson = json.loads(cclib.ccwrite(data, outputtype='cjson',))
 
