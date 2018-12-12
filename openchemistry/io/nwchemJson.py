@@ -9,7 +9,7 @@ class NWChemJsonReader(BaseReader):
         str_data = self._file.read()
         mol = Molecule()
         conv = FileFormatManager()
-        conv.readString(mol, str_data, 'json')
-        cjson_str = conv.writeString(mol, 'cjson')
+        conv.read_string(mol, str_data, 'json')
+        cjson_str = conv.write_string(mol, 'cjson')
         cjson = json.loads(cjson_str)
         return cjson
