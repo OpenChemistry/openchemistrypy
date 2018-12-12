@@ -1,7 +1,7 @@
 import os
 import json
 
-from openchemistry import OpenChemistryTaskFlow
+from taskflows import OpenChemistryTaskFlow
 
 class ChemmlTaskFlow(OpenChemistryTaskFlow):
 

@@ -1,7 +1,7 @@
 import os
 import jinja2
-from openchemistry import OpenChemistryTaskFlow
-from openchemistry.utils import cjson_to_xyz
+from taskflows import OpenChemistryTaskFlow
+from taskflows.utils import cjson_to_xyz
 
 class Psi4TaskFlow(OpenChemistryTaskFlow):
 
