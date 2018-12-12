@@ -83,15 +83,15 @@ def _submit_calculation(cluster_id, pending_calculation_id, optimize, calculatio
     code_params = {
         'nwchem': {
             'label': 'NWChem (version 27327)',
-            'class': 'openchemistry.nwchem.NWChemTaskFlow'
+            'class': 'taskflows.nwchem.NWChemTaskFlow'
         },
         'psi4': {
             'label': 'PSI4 (version 1.2.1)',
-            'class': 'openchemistry.psi4.Psi4TaskFlow'
+            'class': 'taskflows.psi4.Psi4TaskFlow'
         },
         'chemml': {
             'label': 'ChemML',
-            'class': 'openchemistry.chemml.ChemmlTaskFlow'
+            'class': 'taskflows.chemml.ChemmlTaskFlow'
         }
     }
 
