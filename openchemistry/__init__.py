@@ -5,10 +5,11 @@ import os
 import urllib.parse
 import json
 import inspect
+from abc import ABC, abstractmethod
 from jsonpath_rw import parse
 
-from .utils import lookup_file
-from avogadro import io as avo_io, core
+from .utils import lookup_file, calculate_mo
+from avogadro import io as avo_io
 
 from .io.psi4 import Psi4Reader
 from .io.nwchemJson import NWChemJsonReader
@@ -246,7 +247,7 @@ def _frequencies(molecule_id,  optimize=False, basis=None, theory=None,
         taskflow_id = taskflow_id[0].value
     else:
         taskflow_id = None
-    calculation = FrequenciesCalculationResult(calculation['_id'], calculation['properties'], molecule_id)
+    calculation = CalculationResult(calculation['_id'], calculation['properties'], molecule_id)
 
     if pending:
         calculation = PendingCalculationResultWrapper(calculation, taskflow_id)
@@ -294,23 +295,45 @@ def _predict(molecule_id, code='chemml'):
 
 class Molecule(object):
     def __init__(self, cjson):
-        self._cjson = cjson
+        self._provider = CjsonProvider(cjson)
+        self._visualizations = {
+            'structure': None,
+            'orbitals': None,
+            'properties': None,
+            'vibrations': None
+        }
 
     @property
     def structure(self):
-        return Structure(cjson=self._cjson)
+        if self._visualizations['structure'] is None:
+            self._visualizations['structure'] = Structure(self._provider)
+        return self._visualizations['structure']
 
     @property
     def orbitals(self):
-        return Orbitals(self._cjson)
+        if self._visualizations['orbitals'] is None:
+            self._visualizations['orbitals'] = Orbitals(self._provider)
+        return self._visualizations['orbitals']
+
+    @property
+    def properties(self):
+        if self._visualizations['properties'] is None:
+            self._visualizations['properties'] = Properties(self._provider)
+        return self._visualizations['properties']
+
+    @property
+    def vibrations(self):
+        if self._visualizations['vibrations'] is None:
+            self._visualizations['vibrations'] = Vibrations(self._provider)
+        return self._visualizations['vibrations']
 
 class GirderMolecule(Molecule):
     '''
     Derived version that allows calculations to be initiated on using Girder
     '''
-    def __init__(self, _id, cjson=None):
+    def __init__(self, _id, cjson):
+        super(GirderMolecule, self).__init__(cjson)
         self._id = _id
-        self._cjson = cjson
 
     def optimize(self, basis=None, theory=None, functional=None, code='nwchem'):
         return _optimize(self._id, basis, theory, functional, code=code)
@@ -324,149 +347,130 @@ class GirderMolecule(Molecule):
     def predict(self, code='chemml'):
         return _predict(self._id, code=code)
 
-class Structure(object):
+class CalculationResult(Molecule):
 
-    def __init__(self, calculation_result=None, cjson=None):
-        self._calculation_result = calculation_result
-        self._cjson = cjson
+    def __init__(self, _id=None, properties=None, molecule_id=None):
+        super(CalculationResult, self).__init__({})
+        self._id = _id
+        self._properties = properties
+        self._molecule_id = molecule_id
+        self._provider = CalculationProvider(self._id, self._molecule_id)
 
-    def show(self, style='ball-stick'):
+    @property
+    def frequencies(self):
+        import warnings
+        warnings.warn("Use the 'vibrations' property to display normal modes")
+        return self.vibrations
 
-        try:
-            from .notebook import CJSON
-            if self._calculation_result:
-                return CJSON(self._calculation_result._cjson, vibrational=False)
-            else:
-                return CJSON(self._cjson, vibrational=False)
-        except ImportError:
-            # Outside notebook print CJSON
-            print(self._calculation_result._cjson)
+class DataProvider(ABC):
+    @property
+    @abstractmethod
+    def cjson(self):
+        pass
 
-    def url(self, style='ball-stick'):
-        url = '%s/calculations/%s' % (app_base_url.rstrip('/'), self._calculation_result._id)
-        try:
-            from IPython.display import Markdown
-            return Markdown('[%s](%s)' % (url, url))
-        except ImportError:
-            # Outside notebook just print the url
-            print(url)
+    @property
+    @abstractmethod
+    def vibrations(self):
+        pass
 
+    @abstractmethod
+    def load_orbital(self, mo):
+        pass
 
-class Frequencies(object):
+    @property
+    @abstractmethod
+    def url(self):
+        pass
 
-    def __init__(self, calculation_result):
-        self._calculation_result = calculation_result
-
-    def show(self, mode=None, animate_modes=False, spectrum=True):
-        try:
-            from .notebook import CJSON
-            return CJSON(self._calculation_result._cjson, structure=animate_modes,
-                         animate_mode=mode)
-        except ImportError:
-            # Outside notebook print CJSON
-            print(self.table)
-
-    def table(self):
-        return self._calculation_result._vibrational_modes
-
-class Orbitals(object):
-
+class CjsonProvider(DataProvider):
     def __init__(self, cjson):
-        self._cjson = cjson
+        self._cjson_ = cjson
 
-    # Default implementation calculate mo locally
-    def _calculate_mo(self, mo):
-        if isinstance(mo, str):
-            mo = mo.lower()
-            if mo.lower() in ['homo', 'lumo']:
-                # Electron count might be saved in several places...
-                path_expressions = [
-                    'orbitals.electronCount',
-                    'basisSet.electronCount',
-                    'properties.electronCount'
-                ]
-                matches = []
-                for expr in path_expressions:
-                    matches.extend(parse(expr).find(self._cjson))
-                if len(matches) > 0:
-                    electron_count = matches[0].value
-                else:
-                    raise Exception('Unable to access electronCount')
+    @property
+    def cjson(self):
+        return self._cjson_
 
-                # The index of the first orbital is 0, so homo needs to be
-                # electron_count // 2 - 1
-                if mo.lower() == 'homo':
-                    mo = int(electron_count / 2) - 1
-                elif mo.lower() == 'lumo':
-                    mo = int(electron_count / 2)
-            else:
-                raise ValueError('Unsupported mo: %s' % mo)
+    @property
+    def vibrations(self):
+        if 'vibrations' in self.cjson:
+            return self.cjson['vibrations']
+        else:
+            return {'modes': [], 'intensities': [], 'frequencies': []}
 
-        mol = core.Molecule()
-        conv = avo_io.FileFormatManager()
-        conv.read_string(mol, json.dumps(self._cjson), 'cjson')
-        # Do some scaling of our spacing based on the size of the molecule.
-        atom_count = mol.atom_count()
-        spacing = 0.30
-        if atom_count > 50:
-            spacing = 0.5
-        elif atom_count > 30:
-            spacing = 0.4
-        elif atom_count > 10:
-            spacing = 0.33
-        cube = mol.add_cube()
-        # Hard wiring spacing/padding for now, this could be exposed in future too.
-        cube.set_limits(mol, spacing, 4)
-        gaussian = core.GaussianSetTools(mol)
-        gaussian.calculate_molecular_orbital(cube, mo)
+    def load_orbital(self, mo):
+        cube = calculate_mo(self.cjson, mo)
+        cjson = self.cjson
+        cjson['cube'] = cube
 
-        return json.loads(conv.write_string(mol, "cjson"))['cube']
+    @property
+    def url(self):
+        return None
 
+class CalculationProvider(DataProvider):
+    def __init__(self, calculation_id, molecule_id):
+        self._id = calculation_id
+        self._molecule_id = molecule_id
+        self._cjson_ = None
+        self._vibrational_modes_ = None
 
-    def show(self, mo='homo', iso=None):
+    @property
+    def cjson(self):
+        if self._cjson_ is None:
+            self._cjson_ = girder_client.get('calculations/%s/cjson' % self._id)
+
+        return self._cjson_
+
+    @property
+    def vibrations(self):
+        if self._vibrational_modes_ is None:
+            self._vibrational_modes_ = girder_client.get('calculations/%s/vibrationalmodes' % self._id)
+
+        return self._vibrational_modes_
+
+    def load_orbital(self, mo):
+        cube = girder_client.get('calculations/%s/cube/%s' % (self._id, mo))['cube']
+        cjson = self.cjson
+        cjson['cube'] = cube
+
+    @property
+    def url(self):
+        return '%s/calculations/%s' % (app_base_url.rstrip('/'), self._id)
+
+class Visualization(ABC):
+    def __init__(self, provider):
+        self._provider = provider
+        self._params = {}
+
+    @abstractmethod
+    def show(self, viewer='moljs', spectrum=False, volume=False, isosurface=False, menu=True, mo=None, isovalue=None, mode=-1, play=False, alt=None):
+        self._params = {
+            'moleculeRenderer': viewer,
+            'showSpectrum': spectrum,
+            'showVolume': volume,
+            'showIsoSurface': isosurface,
+            'showMenu': menu,
+            'iOrbital': mo,
+            'isoValue': isovalue,
+            'iMode': mode,
+            'play': play
+        }
         try:
             from .notebook import CJSON
-
-            cjson_copy = self._cjson.copy()
-            cjson_copy['cube'] = self._calculate_mo(mo)
-
-            extra = {}
-            if iso:
-                extra['iso_value'] = iso
-
-            return CJSON(cjson_copy, vibrational=False, mo=mo, **extra)
+            return CJSON(self._provider.cjson, **self._params)
         except ImportError:
             # Outside notebook print CJSON
-            print(self._cjson)
-
-
-class CalculationResultOrbitals(Orbitals):
-
-    def __init__(self, calculation_result):
-        self._calculation_result = calculation_result
-        super(CalculationResultOrbitals, self).__init__(calculation_result._cjson)
-
-    def show(self, mo='homo', iso=None):
-        # Save parameter to use in url
-        self._last_mo = mo
-        self._last_iso = iso
-
-        return super(CalculationResultOrbitals, self).show(mo, iso)
+            if alt is None:
+                print(self._provider.cjson)
+            else:
+                print(alt)
 
     def url(self):
-        url = '%s/calculations/%s' % (app_base_url.rstrip('/'), self._calculation_result._id)
+        url = self._provider.url
+        if url is None:
+            raise ValueError('The current structure is not coming from a calculation')
 
-        params = { }
-
-        if self._last_mo is not None:
-            params['mo'] = self._last_mo
-
-        if self._last_iso is not None:
-            params['iso'] = self._last_iso
-
-        if params:
-            url = '%s?%s' % (url, urllib.parse.urlencode(params))
-
+        if self._params:
+            url = '%s?%s' % (url, urllib.parse.urlencode(self._params))
         try:
             from IPython.display import Markdown
             return Markdown('[%s](%s)' % (url, url))
@@ -474,43 +478,82 @@ class CalculationResultOrbitals(Orbitals):
             # Outside notebook just print the url
             print(url)
 
-    def _calculate_mo(self, mo):
-        return self._calculation_result._cube(mo)['cube']
+class Structure(Visualization):
 
-class Properties(object):
+    def show(self, viewer='moljs', menu=True, **kwargs):
+        return super(Structure, self).show(viewer=viewer, menu=menu, **kwargs)
 
-    def __init__(self, calculation_result=None, cjson=None):
-        self._calculation_result = calculation_result
-        self._cjson = cjson
+class Vibrations(Visualization):
 
-    def show(self):
+    def show(self, viewer='moljs', spectrum=True, menu=True, mode=-1, play=True, **kwargs):
+        return super(Vibrations, self).show(viewer=viewer, spectrum=spectrum, menu=menu, mode=mode, play=play, **kwargs)
 
+    def table(self):
+        vibrations = self._provider.vibrations
         try:
             from IPython.display import Markdown
-            if self._calculation_result:
-                table = self._properties_table(self._calculation_result._cjson)
-            else:
-                table = self._properties_table(self._cjson)
+            table = self._md_table(vibrations)
             return Markdown(table)
         except ImportError:
             # Outside notebook print CJSON
-            print(self._calculation_result._cjson)
+            print(vibrations)
 
-    def url(self, style='ball-stick'):
-        url = '%s/calculations/%s' % (app_base_url.rstrip('/'), self._calculation_result._id)
+    def _md_table(self, vibrations):
+        import math
+        table = '''### Normal Modes
+| # | Frequency | Intensity |
+|------|-------|-------|'''
+        frequencies = vibrations.get('frequencies', [])
+        intensities = vibrations.get('intensities', [])
+
+        n = len(frequencies)
+        if len(intensities) != n:
+            intensities = None
+
+        for i, freq in enumerate(frequencies):
+            try:
+                freq = float(freq)
+            except ValueError:
+                freq = math.nan
+
+            intensity = math.nan if intensities is None else intensities[i]
+            try:
+                intensity = float(intensity)
+            except ValueError:
+                intensity = math.nan
+
+            table += '\n| %s | %.2f | %.2f |' % (
+                i,
+                freq,
+                intensity
+            )
+
+        return table
+
+class Orbitals(Visualization):
+
+    def show(self, viewer='moljs', volume=False, isosurface=True, menu=True, mo='homo', isovalue=0.05, **kwargs):
+        self._provider.load_orbital(mo)
+        return super(Orbitals, self).show(viewer=viewer, volume=volume, isosurface=isosurface, menu=menu, mo=mo, isovalue=isovalue)
+
+class Properties(Visualization):
+
+    def show(self, **kwargs):
+        cjson = self._provider.cjson
+        properties = cjson.get('calculatedProperties', {})
         try:
             from IPython.display import Markdown
-            return Markdown('[%s](%s)' % (url, url))
+            table = self._md_table(properties)
+            return Markdown(table)
         except ImportError:
-            # Outside notebook just print the url
-            print(url)
+            # Outside notebook print CJSON
+            print(properties)
 
-    def _properties_table(self, cjson):
+    def _md_table(self, properties):
         import math
         table = '''### Calculated Properties
 | Name | Value | Units |
 |------|-------|-------|'''
-        properties = cjson.get('calculatedProperties', {})
 
         for prop in properties.values():
             value = prop.get('value', math.nan)
@@ -525,71 +568,6 @@ class Properties(object):
             )
 
         return table
-
-
-class CalculationResult(object):
-
-    def __init__(self, _id=None, properties=None, molecule_id=None):
-        self._id = _id
-        self._cjson_ = None
-        self._vibrational_modes_ = None
-        self._orbitals = None
-        self._molecule_id = molecule_id
-        self._properties = properties
-
-    @property
-    def _cjson(self):
-        if self._cjson_ is None:
-            self._cjson_ = girder_client.get('calculations/%s/cjson' % self._id)
-
-        return self._cjson_
-
-    @property
-    def _vibrational_modes(self):
-        if self._vibrational_modes_ is None:
-            self._vibrational_modes_ = girder_client.get('calculations/%s/vibrationalmodes' % self._id)
-
-        return self._vibrational_modes_
-
-    def _cube(self, mo):
-        return girder_client.get('calculations/%s/cube/%s' % (self._id, mo))
-
-    @property
-    def structure(self):
-        return Structure(self)
-
-    @property
-    def orbitals(self):
-        if self._orbitals is None:
-            self._orbitals = CalculationResultOrbitals(self)
-
-        return self._orbitals
-
-    @property
-    def properties(self):
-        return Properties(self)
-
-
-    def optimize(self, basis=None, theory=None, functional=None):
-        return _optimize(self._molecule_id, basis, theory, functional, self._id)
-
-    def frequencies(self, optimize=False, basis=None, theory=None, functional=None):
-        return _frequencies(self._molecule_id, optimize, basis, theory,
-                            functional, self._id)
-
-    def energy(self, optimize=False, basis=None, theory=None, functional=None):
-        return _energy(self._molecule_id, optimize, basis, theory, functional,
-                       self._id)
-
-
-class FrequenciesCalculationResult(CalculationResult):
-    def __init__(self, _id=None, properties=None, molecule_id=None):
-        super(FrequenciesCalculationResult, self).__init__(_id, properties,
-                                                           molecule_id)
-
-    @property
-    def frequencies(self):
-        return Frequencies(self)
 
 class AttributeInterceptor(object):
     def __init__(self, wrapped, value, intercept_func=lambda : True):
@@ -621,7 +599,7 @@ class PendingCalculationResultWrapper(AttributeInterceptor):
         try:
             from .notebook import CalculationMonitor
             if taskflow_id is None:
-                taskflow_id = calculation.properties['taskFlowId']
+                taskflow_id = calculation._properties['taskFlowId']
 
             table = CalculationMonitor({
                 'taskFlowIds': [taskflow_id],
@@ -806,7 +784,6 @@ def find_structure(identifier, basis=None, theory=None, functional=None, code='n
 
     return molecule
 
-
 def setup_reaction(equation):
     return Reaction(equation)
 
@@ -859,4 +836,3 @@ def show_free_energies(reactions, basis=None, theory=None, functional=None):
 
 def load(cjson):
     return Molecule(cjson)
-

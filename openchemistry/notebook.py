@@ -1,39 +1,14 @@
 from IPython.display import display, JSON, DisplayObject
 
-# A display class that can be used within a notebook.
-#   from openchemistry.notebook import CJSON
-#   CJSON(data)
-
-DEFAULT_ISO = 0.05;
-DEFAULT_ISO_SURFACES = [{
-    'value': DEFAULT_ISO,
-    'color': 'blue',
-    'opacity': 0.9,
-  }, {
-    'value': -DEFAULT_ISO,
-    'color': 'red',
-    'opacity': 0.9
-  }]
-
 class CJSON(JSON):
     """A display class for displaying CJSON visualizations in the Jupyter Notebook and IPython kernel.
     CJSON expects a JSON-able dict, not serialized JSON strings.
     Scalar types (None, number, string) are not allowed, only dict containers.
     """
 
-
-
-    def __init__(self, data=None, url=None, filename=None, vibrational=True, structure=True,
-                 iso_surfaces=DEFAULT_ISO_SURFACES, animate_mode=None, calculation_id=None,
-                 iso_value=DEFAULT_ISO, mo=None):
+    def __init__(self, data=None, url=None, filename=None, **kwargs):
         super(CJSON, self).__init__(data, url, filename)
-        self.metadata['vibrational'] = vibrational
-        self.metadata['structure'] = structure
-        self.metadata['isoValue'] = iso_value
-        self.metadata['isoSurfaces'] = iso_surfaces
-        self.metadata['animateMode'] = animate_mode
-        self.metadata['mo'] = mo
-        self.metadata['calculationId'] = calculation_id
+        self.metadata = {**self.metadata, **kwargs}
 
     def _ipython_display_(self):
         bundle = {

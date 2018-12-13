@@ -1,7 +1,11 @@
 import os
 import requests
 import re
+import json
 
+import avogadro
+
+from jsonpath_rw import parse
 from IPython.lib import kernel
 
 
@@ -37,3 +41,49 @@ def lookup_file(girder_client, jupyterhub_url):
 
     return girder_client.resourceLookup('user/%s/Private/oc/notebooks/%s/%s' % (login, path, name))
 
+def calculate_mo(cjson, mo):
+    if isinstance(mo, str):
+        mo = mo.lower()
+        if mo.lower() in ['homo', 'lumo']:
+            # Electron count might be saved in several places...
+            path_expressions = [
+                'orbitals.electronCount',
+                'basisSet.electronCount',
+                'properties.electronCount'
+            ]
+            matches = []
+            for expr in path_expressions:
+                matches.extend(parse(expr).find(cjson))
+            if len(matches) > 0:
+                electron_count = matches[0].value
+            else:
+                raise Exception('Unable to access electronCount')
+
+            # The index of the first orbital is 0, so homo needs to be
+            # electron_count // 2 - 1
+            if mo.lower() == 'homo':
+                mo = int(electron_count / 2) - 1
+            elif mo.lower() == 'lumo':
+                mo = int(electron_count / 2)
+        else:
+            raise ValueError('Unsupported mo: %s' % mo)
+
+    mol = avogadro.core.Molecule()
+    conv = avogadro.io.FileFormatManager()
+    conv.read_string(mol, json.dumps(cjson), 'cjson')
+    # Do some scaling of our spacing based on the size of the molecule.
+    atom_count = mol.atom_count()
+    spacing = 0.30
+    if atom_count > 50:
+        spacing = 0.5
+    elif atom_count > 30:
+        spacing = 0.4
+    elif atom_count > 10:
+        spacing = 0.33
+    cube = mol.add_cube()
+    # Hard wiring spacing/padding for now, this could be exposed in future too.
+    cube.set_limits(mol, spacing, 4)
+    gaussian = avogadro.core.GaussianSetTools(mol)
+    gaussian.calculate_molecular_orbital(cube, mo)
+
+    return json.loads(conv.write_string(mol, "cjson"))['cube']
