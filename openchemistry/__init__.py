@@ -297,35 +297,35 @@ class Molecule(object):
     def __init__(self, cjson):
         self._provider = CjsonProvider(cjson)
         self._visualizations = {
-            'Structure': None,
-            'Orbitals': None,
-            'Properties': None,
-            'Vibrations': None
+            'structure': None,
+            'orbitals': None,
+            'properties': None,
+            'vibrations': None
         }
 
     @property
     def structure(self):
-        return self._get_visualization('Structure')
+        if self._visualizations['structure'] is None:
+            self._visualizations['structure'] = Structure(self._provider)
+        return self._visualizations['structure']
 
     @property
     def orbitals(self):
-        return self._get_visualization('Orbitals')
+        if self._visualizations['orbitals'] is None:
+            self._visualizations['orbitals'] = Orbitals(self._provider)
+        return self._visualizations['orbitals']
 
     @property
     def properties(self):
-        return self._get_visualization('Properties')
+        if self._visualizations['properties'] is None:
+            self._visualizations['properties'] = Properties(self._provider)
+        return self._visualizations['properties']
 
     @property
     def vibrations(self):
-        return self._get_visualization('Vibrations')
-
-    def _get_visualization(self, name):
-        if name in self._visualizations and name in globals():
-            if self._visualizations[name] is None:
-                self._visualizations[name] = globals()[name](self._provider)
-            return self._visualizations[name]
-        else:
-            return None
+        if self._visualizations['vibrations'] is None:
+            self._visualizations['vibrations'] = Vibrations(self._provider)
+        return self._visualizations['vibrations']
 
 class GirderMolecule(Molecule):
     '''
@@ -356,7 +356,13 @@ class CalculationResult(Molecule):
         self._molecule_id = molecule_id
         self._provider = CalculationProvider(self._id, self._molecule_id)
 
-class VisDataProvider(ABC):
+    @property
+    def frequencies(self):
+        import warnings
+        warnings.warn("Use the 'vibrations' property to display normal modes")
+        return self.vibrations
+
+class DataProvider(ABC):
     @property
     @abstractmethod
     def cjson(self):
@@ -376,7 +382,7 @@ class VisDataProvider(ABC):
     def url(self):
         pass
 
-class CjsonProvider(VisDataProvider):
+class CjsonProvider(DataProvider):
     def __init__(self, cjson):
         self._cjson_ = cjson
 
@@ -400,7 +406,7 @@ class CjsonProvider(VisDataProvider):
     def url(self):
         return None
 
-class CalculationProvider(VisDataProvider):
+class CalculationProvider(DataProvider):
     def __init__(self, calculation_id, molecule_id):
         self._id = calculation_id
         self._molecule_id = molecule_id
@@ -429,7 +435,6 @@ class CalculationProvider(VisDataProvider):
     @property
     def url(self):
         return '%s/calculations/%s' % (app_base_url.rstrip('/'), self._id)
-
 
 class Visualization(ABC):
     def __init__(self, provider):
@@ -475,13 +480,13 @@ class Visualization(ABC):
 
 class Structure(Visualization):
 
-    def show(self, viewer='moljs', menu=True):
-        return super(Structure, self).show(viewer=viewer, menu=menu)
+    def show(self, viewer='moljs', menu=True, **kwargs):
+        return super(Structure, self).show(viewer=viewer, menu=menu, **kwargs)
 
 class Vibrations(Visualization):
 
-    def show(self, viewer='moljs', spectrum=True, menu=True, mode=-1, play=True):
-        return super(Vibrations, self).show(viewer=viewer, spectrum=spectrum, menu=menu, mode=mode, play=play)
+    def show(self, viewer='moljs', spectrum=True, menu=True, mode=-1, play=True, **kwargs):
+        return super(Vibrations, self).show(viewer=viewer, spectrum=spectrum, menu=menu, mode=mode, play=play, **kwargs)
 
     def table(self):
         vibrations = self._provider.vibrations
@@ -527,13 +532,13 @@ class Vibrations(Visualization):
 
 class Orbitals(Visualization):
 
-    def show(self, viewer='moljs', volume=False, isosurface=True, menu=True, mo='homo', isovalue=0.05):
+    def show(self, viewer='moljs', volume=False, isosurface=True, menu=True, mo='homo', isovalue=0.05, **kwargs):
         self._provider.load_orbital(mo)
         return super(Orbitals, self).show(viewer=viewer, volume=volume, isosurface=isosurface, menu=menu, mo=mo, isovalue=isovalue)
 
 class Properties(Visualization):
 
-    def show(self):
+    def show(self, **kwargs):
         cjson = self._provider.cjson
         properties = cjson.get('calculatedProperties', {})
         try:
