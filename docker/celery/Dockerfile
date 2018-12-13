@@ -20,6 +20,9 @@ RUN chown -R celery  /cumulus
 # Copy over openchemistrypy
 COPY . /openchemistrypy
 
+# Install Avogadro
+RUN pip install avogadro
+
 # Change ownership
 RUN chown -R celery  /openchemistrypy
 
