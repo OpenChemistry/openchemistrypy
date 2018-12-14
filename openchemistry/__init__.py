@@ -454,7 +454,7 @@ class Visualization(ABC):
         self._params = {}
 
     @abstractmethod
-    def show(self, viewer='moljs', spectrum=False, volume=False, isosurface=False, menu=True, mo=None, iso=None, mode=-1, play=False, alt=None):
+    def show(self, viewer='moljs', spectrum=False, volume=False, isosurface=False, menu=True, mo=None, iso=None, transfer_function=None, mode=-1, play=False, alt=None):
         self._params = {
             'moleculeRenderer': viewer,
             'showSpectrum': spectrum,
@@ -464,7 +464,8 @@ class Visualization(ABC):
             'iOrbital': mo,
             'isoValue': iso,
             'iMode': mode,
-            'play': play
+            'play': play,
+            **self._transfer_function_to_params(transfer_function)
         }
         try:
             from .notebook import CJSON
@@ -489,6 +490,46 @@ class Visualization(ABC):
         except ImportError:
             # Outside notebook just print the url
             print(url)
+
+    def _transfer_function_to_params(self, transfer_function):
+        '''
+        transfer_function = {
+            "colormap": {
+                "colors": [[r0, g0, b0], [r1, g1, b1], ...],
+                "points": [p0, p1, ...]
+            },
+            "opacitymap": {
+                "opacities": [alpha0, alpha1, ...],
+                "points": [p0, p1, ...]
+            }
+        }
+        '''
+        params = {}
+
+        if transfer_function is None or not isinstance(transfer_function, dict):
+            return params
+
+        colormap = transfer_function.get('colormap')
+        if colormap is not None:
+            colors = colormap.get('colors')
+            points = colormap.get('points')
+            if colors is not None:
+                params['colors'] = colors
+                params['activeMapName'] = 'Custom'
+            if points is not None:
+                params['colorsX'] = points
+
+        opacitymap = transfer_function.get('opacitymap')
+        if opacitymap is not None:
+            opacities = opacitymap.get('opacities')
+            points = opacitymap.get('points')
+            if opacities is not None:
+                params['opacities'] = opacities
+            if points is not None:
+                params['opacitiesX'] = points
+
+        return params
+
 
 class Structure(Visualization):
 
@@ -544,9 +585,9 @@ class Vibrations(Visualization):
 
 class Orbitals(Visualization):
 
-    def show(self, viewer='moljs', volume=False, isosurface=True, menu=True, mo='homo', iso=0.05, **kwargs):
+    def show(self, viewer='moljs', volume=False, isosurface=True, menu=True, mo='homo', iso=0.05, transfer_function=None, **kwargs):
         self._provider.load_orbital(mo)
-        return super(Orbitals, self).show(viewer=viewer, volume=volume, isosurface=isosurface, menu=menu, mo=mo, iso=iso)
+        return super(Orbitals, self).show(viewer=viewer, volume=volume, isosurface=isosurface, menu=menu, mo=mo, iso=iso, transfer_function=transfer_function)
 
 class Properties(Visualization):
 
