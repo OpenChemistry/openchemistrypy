@@ -454,7 +454,7 @@ class Visualization(ABC):
         self._params = {}
 
     @abstractmethod
-    def show(self, viewer='moljs', spectrum=False, volume=False, isosurface=False, menu=True, mo=None, isovalue=None, mode=-1, play=False, alt=None):
+    def show(self, viewer='moljs', spectrum=False, volume=False, isosurface=False, menu=True, mo=None, iso=None, mode=-1, play=False, alt=None):
         self._params = {
             'moleculeRenderer': viewer,
             'showSpectrum': spectrum,
@@ -462,7 +462,7 @@ class Visualization(ABC):
             'showIsoSurface': isosurface,
             'showMenu': menu,
             'iOrbital': mo,
-            'isoValue': isovalue,
+            'isoValue': iso,
             'iMode': mode,
             'play': play
         }
@@ -544,9 +544,9 @@ class Vibrations(Visualization):
 
 class Orbitals(Visualization):
 
-    def show(self, viewer='moljs', volume=False, isosurface=True, menu=True, mo='homo', isovalue=0.05, **kwargs):
+    def show(self, viewer='moljs', volume=False, isosurface=True, menu=True, mo='homo', iso=0.05, **kwargs):
         self._provider.load_orbital(mo)
-        return super(Orbitals, self).show(viewer=viewer, volume=volume, isosurface=isosurface, menu=menu, mo=mo, isovalue=isovalue)
+        return super(Orbitals, self).show(viewer=viewer, volume=volume, isosurface=isosurface, menu=menu, mo=mo, iso=iso)
 
 class Properties(Visualization):
 
