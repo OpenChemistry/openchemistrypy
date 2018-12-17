@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from jsonpath_rw import parse
 
 from .utils import lookup_file, calculate_mo
-from avogadro import io as avo_io
+import avogadro
 
 from .io.psi4 import Psi4Reader
 from .io.nwchemJson import NWChemJsonReader
@@ -294,8 +294,8 @@ def _predict(molecule_id, code='chemml'):
     return calculation
 
 class Molecule(object):
-    def __init__(self, cjson):
-        self._provider = CjsonProvider(cjson)
+    def __init__(self, provider):
+        self._provider = provider
         self._visualizations = {
             'structure': None,
             'orbitals': None,
@@ -332,7 +332,7 @@ class GirderMolecule(Molecule):
     Derived version that allows calculations to be initiated on using Girder
     '''
     def __init__(self, _id, cjson):
-        super(GirderMolecule, self).__init__(cjson)
+        super(GirderMolecule, self).__init__(CjsonProvider(cjson))
         self._id = _id
 
     def optimize(self, basis=None, theory=None, functional=None, code='nwchem'):
@@ -350,11 +350,10 @@ class GirderMolecule(Molecule):
 class CalculationResult(Molecule):
 
     def __init__(self, _id=None, properties=None, molecule_id=None):
-        super(CalculationResult, self).__init__({})
+        super(CalculationResult, self).__init__(CalculationProvider(id, molecule_id))
         self._id = _id
         self._properties = properties
         self._molecule_id = molecule_id
-        self._provider = CalculationProvider(self._id, self._molecule_id)
 
     @property
     def frequencies(self):
@@ -436,13 +435,26 @@ class CalculationProvider(DataProvider):
     def url(self):
         return '%s/calculations/%s' % (app_base_url.rstrip('/'), self._id)
 
+class AvogadroProvider(CjsonProvider):
+    def __init__(self, molecule):
+        self._molecule = molecule
+        self._cjson = None
+
+    @property
+    def cjson(self):
+        if self._cjson is None:
+            conv = avogadro.io.FileFormatManager()
+            cjson_str = conv.write_string(self._molecule, 'cjson')
+            self._cjson = json.loads(cjson_str)
+        return self._cjson
+
 class Visualization(ABC):
     def __init__(self, provider):
         self._provider = provider
         self._params = {}
 
     @abstractmethod
-    def show(self, viewer='moljs', spectrum=False, volume=False, isosurface=False, menu=True, mo=None, isovalue=None, mode=-1, play=False, alt=None):
+    def show(self, viewer='moljs', spectrum=False, volume=False, isosurface=False, menu=True, mo=None, iso=None, transfer_function=None, mode=-1, play=False, alt=None):
         self._params = {
             'moleculeRenderer': viewer,
             'showSpectrum': spectrum,
@@ -450,9 +462,10 @@ class Visualization(ABC):
             'showIsoSurface': isosurface,
             'showMenu': menu,
             'iOrbital': mo,
-            'isoValue': isovalue,
+            'isoValue': iso,
             'iMode': mode,
-            'play': play
+            'play': play,
+            **self._transfer_function_to_params(transfer_function)
         }
         try:
             from .notebook import CJSON
@@ -477,6 +490,46 @@ class Visualization(ABC):
         except ImportError:
             # Outside notebook just print the url
             print(url)
+
+    def _transfer_function_to_params(self, transfer_function):
+        '''
+        transfer_function = {
+            "colormap": {
+                "colors": [[r0, g0, b0], [r1, g1, b1], ...],
+                "points": [p0, p1, ...]
+            },
+            "opacitymap": {
+                "opacities": [alpha0, alpha1, ...],
+                "points": [p0, p1, ...]
+            }
+        }
+        '''
+        params = {}
+
+        if transfer_function is None or not isinstance(transfer_function, dict):
+            return params
+
+        colormap = transfer_function.get('colormap')
+        if colormap is not None:
+            colors = colormap.get('colors')
+            points = colormap.get('points')
+            if colors is not None:
+                params['colors'] = colors
+                params['activeMapName'] = 'Custom'
+            if points is not None:
+                params['colorsX'] = points
+
+        opacitymap = transfer_function.get('opacitymap')
+        if opacitymap is not None:
+            opacities = opacitymap.get('opacities')
+            points = opacitymap.get('points')
+            if opacities is not None:
+                params['opacities'] = opacities
+            if points is not None:
+                params['opacitiesX'] = points
+
+        return params
+
 
 class Structure(Visualization):
 
@@ -532,9 +585,9 @@ class Vibrations(Visualization):
 
 class Orbitals(Visualization):
 
-    def show(self, viewer='moljs', volume=False, isosurface=True, menu=True, mo='homo', isovalue=0.05, **kwargs):
+    def show(self, viewer='moljs', volume=False, isosurface=True, menu=True, mo='homo', iso=0.05, transfer_function=None, **kwargs):
         self._provider.load_orbital(mo)
-        return super(Orbitals, self).show(viewer=viewer, volume=volume, isosurface=isosurface, menu=menu, mo=mo, isovalue=isovalue)
+        return super(Orbitals, self).show(viewer=viewer, volume=volume, isosurface=isosurface, menu=menu, mo=mo, iso=iso, transfer_function=transfer_function)
 
 class Properties(Visualization):
 
@@ -824,7 +877,7 @@ def show_free_energies(reactions, basis=None, theory=None, functional=None):
             # Outside notebook just print message
             table = 'Pending calculations .... '
 
-        return table;
+        return table
 
     try:
         from .notebook import FreeEnergy
@@ -834,5 +887,11 @@ def show_free_energies(reactions, basis=None, theory=None, functional=None):
         # Outside notebook print the data
         print(free_energy_chart_data)
 
-def load(cjson):
-    return Molecule(cjson)
+def load(data):
+    if isinstance(data, dict):
+        provider = CjsonProvider(data)
+    elif isinstance(data, avogadro.core.Molecule):
+        provider = AvogadroProvider(data)
+    else:
+        raise TypeError("Load accepts either a cjson dict, or an avogadro.core.Molecule")
+    return Molecule(provider)
