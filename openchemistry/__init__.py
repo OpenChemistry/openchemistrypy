@@ -351,7 +351,7 @@ class GirderMolecule(Molecule):
 class CalculationResult(Molecule):
 
     def __init__(self, _id=None, properties=None, molecule_id=None):
-        super(CalculationResult, self).__init__(CalculationProvider(id, molecule_id))
+        super(CalculationResult, self).__init__(CalculationProvider(_id, molecule_id))
         self._id = _id
         self._properties = properties
         self._molecule_id = molecule_id
