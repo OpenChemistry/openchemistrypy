@@ -5,6 +5,7 @@ import os
 import urllib.parse
 import json
 import inspect
+import collections
 from abc import ABC, abstractmethod
 from jsonpath_rw import parse
 
@@ -350,7 +351,7 @@ class GirderMolecule(Molecule):
 class CalculationResult(Molecule):
 
     def __init__(self, _id=None, properties=None, molecule_id=None):
-        super(CalculationResult, self).__init__(CalculationProvider(id, molecule_id))
+        super(CalculationResult, self).__init__(CalculationProvider(_id, molecule_id))
         self._id = _id
         self._properties = properties
         self._molecule_id = molecule_id
@@ -381,8 +382,26 @@ class DataProvider(ABC):
     def url(self):
         pass
 
-class CjsonProvider(DataProvider):
+class CachedDataProvider(DataProvider):
+    MAX_CACHED = 5
+
+    def __init__(self):
+        self._cached_volumes = collections.OrderedDict()
+
+    def _get_cached_volume(self, mo):
+        if mo in self._cached_volumes:
+            return self._cached_volumes[mo]
+        return None
+
+    def _set_cached_volume(self, mo, cube):
+        keys = self._cached_volumes.keys()
+        if len(keys) >= self.MAX_CACHED:
+            del self._cached_volumes[next(iter(keys))]
+        self._cached_volumes[mo] = cube
+
+class CjsonProvider(CachedDataProvider):
     def __init__(self, cjson):
+        super(CjsonProvider, self).__init__()
         self._cjson_ = cjson
 
     @property
@@ -397,7 +416,10 @@ class CjsonProvider(DataProvider):
             return {'modes': [], 'intensities': [], 'frequencies': []}
 
     def load_orbital(self, mo):
-        cube = calculate_mo(self.cjson, mo)
+        cube = super(CjsonProvider, self)._get_cached_volume(mo)
+        if cube is None:
+            cube = calculate_mo(self.cjson, mo)
+            super(CjsonProvider, self)._set_cached_volume(mo, cube)
         cjson = self.cjson
         cjson['cube'] = cube
 
@@ -405,8 +427,9 @@ class CjsonProvider(DataProvider):
     def url(self):
         return None
 
-class CalculationProvider(DataProvider):
+class CalculationProvider(CachedDataProvider):
     def __init__(self, calculation_id, molecule_id):
+        super(CalculationProvider, self).__init__()
         self._id = calculation_id
         self._molecule_id = molecule_id
         self._cjson_ = None
@@ -427,7 +450,10 @@ class CalculationProvider(DataProvider):
         return self._vibrational_modes_
 
     def load_orbital(self, mo):
-        cube = girder_client.get('calculations/%s/cube/%s' % (self._id, mo))['cube']
+        cube = super(CalculationProvider, self)._get_cached_volume(mo)
+        if cube is None:
+            cube = girder_client.get('calculations/%s/cube/%s' % (self._id, mo))['cube']
+            super(CalculationProvider, self)._set_cached_volume(mo, cube)
         cjson = self.cjson
         cjson['cube'] = cube
 
@@ -461,9 +487,9 @@ class Visualization(ABC):
             'showVolume': volume,
             'showIsoSurface': isosurface,
             'showMenu': menu,
-            'iOrbital': mo,
+            'mo': mo,
             'isoValue': iso,
-            'iMode': mode,
+            'mode': mode,
             'play': play,
             **self._transfer_function_to_params(transfer_function)
         }
