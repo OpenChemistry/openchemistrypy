@@ -487,9 +487,9 @@ class Visualization(ABC):
             'showVolume': volume,
             'showIsoSurface': isosurface,
             'showMenu': menu,
-            'iOrbital': mo,
+            'mo': mo,
             'isoValue': iso,
-            'iMode': mode,
+            'mode': mode,
             'play': play,
             **self._transfer_function_to_params(transfer_function)
         }
