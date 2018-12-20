@@ -104,16 +104,22 @@ def _submit_calculation(cluster_id, pending_calculation_id, optimize, calculatio
     taskflow_class = code_params[code]['class']
 
     # Create the taskflow
+    queue = _fetch_or_create_queue()
+
     body = {
         'taskFlowClass': taskflow_class,
         'meta': {
-            'code': code_label
+            'code': code_label,
+            'calculationId': pending_calculation_id,
+            'queueId': queue['_id']
         }
     }
+
     if calculation_types is not None:
         body['meta']['type'] = calculation_types
 
     taskflow = girder_client.post('taskflows', json=body)
+
     # Start the taskflow
     body = {
         'input': {
@@ -133,13 +139,8 @@ def _submit_calculation(cluster_id, pending_calculation_id, optimize, calculatio
             'name': 'cori'
         }
 
-    girder_client.put('taskflows/%s/start' % taskflow['_id'], json=body)
-
-    # Set the pending calculation id in the meta data
-    body = {
-        'meta.calculationId': pending_calculation_id
-    }
-    girder_client.patch('taskflows/%s' % taskflow['_id'], json=body)
+    girder_client.post('queues/%s/add/%s' % (queue['_id'], taskflow['_id']), json=body)
+    girder_client.post('queues/%s/popall' % queue['_id'])
 
     return taskflow['_id']
 
@@ -213,6 +214,18 @@ def _fetch_or_submit_calculation(molecule_id, type_, basis=None, theory=None, fu
                             json=body)
 
     return calculation
+
+def _fetch_or_create_queue():
+    params = {'name': 'oc_queue'}
+    queue = girder_client.get('queues', parameters=params)
+
+    if (len(queue) > 0):
+        queue = queue[0]
+    else:
+        params = {'name': 'oc_queue', 'max_running': 2}
+        queue = girder_client.post('queues', parameters=params)
+
+    return queue
 
 def _optimize(molecule_id, basis=None, theory=None, functional=None, input_geometry=None, code='nwchem'):
     type_ = 'optimization'
