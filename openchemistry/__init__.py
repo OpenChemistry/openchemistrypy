@@ -934,3 +934,24 @@ def load(data):
     else:
         raise TypeError("Load accepts either a cjson dict, or an avogadro.core.Molecule")
     return Molecule(provider)
+
+def queue():
+    if girder_host is None:
+        import warnings
+        warnings.warn("Cannot displaying pending calculations, the notebook is not running in a Girder environment")
+        return
+
+    queue = _fetch_or_create_queue()
+    taskflowIds = queue['running'] + queue['pending']
+
+    try:
+        from .notebook import CalculationMonitor
+        table = CalculationMonitor({
+            'taskFlowIds': taskflowIds,
+            'girderToken': girder_client.token
+        })
+    except ImportError:
+        # Outside notebook just print message
+        table = 'Pending calculations .... '
+
+    return table
