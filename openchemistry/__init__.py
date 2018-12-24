@@ -140,7 +140,7 @@ def _submit_calculation(cluster_id, pending_calculation_id, optimize, calculatio
         }
 
     girder_client.post('queues/%s/add/%s' % (queue['_id'], taskflow['_id']), json=body)
-    girder_client.post('queues/%s/popall' % queue['_id'])
+    girder_client.post('queues/%s/pop' % queue['_id'], parameters={'multi': True})
 
     return taskflow['_id']
 
@@ -942,12 +942,21 @@ def queue():
         return
 
     queue = _fetch_or_create_queue()
-    taskflowIds = queue['running'] + queue['pending']
+    running = []
+    pending = []
+
+    for taskflow_id, status in queue['taskflows'].items():
+        if status == 'pending':
+            pending.append(taskflow_id)
+        elif status == 'running':
+            running.append(taskflow_id)
+
+    taskflow_ids = running + pending
 
     try:
         from .notebook import CalculationMonitor
         table = CalculationMonitor({
-            'taskFlowIds': taskflowIds,
+            'taskFlowIds': taskflow_ids,
             'girderToken': girder_client.token
         })
     except ImportError:

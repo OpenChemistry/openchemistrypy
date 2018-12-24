@@ -444,4 +444,4 @@ def postprocess_template(task, _, run_folder, input_, cluster, job):
     queue_id = meta.get('queueId', None)
     if queue_id is not None:
         client.post('queues/%s/finish/%s' % (queue_id, task.taskflow.id))
-        client.post('queues/%s/popall' % queue_id)
+        client.post('queues/%s/pop' % queue_id, parameters={'multi': True})
