@@ -1,0 +1,13 @@
+{
+  "name": "NWChem",
+  "version": "6.8.1",
+  "description": "NWChem: Open Source High-Performance Computational Chemistry",
+  "input": {
+    "geometry": {
+      "format": "xyz"
+    }
+  },
+  "output": {
+    "format": "cjson"
+  }
+}

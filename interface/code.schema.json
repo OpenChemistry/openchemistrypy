@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://openchemistry.org/code.schema.json",
+  "title": "Code description schema",
+  "description": "A description of the codes input and output requirements.",
+
+  "definitions": {
+    "geometryFormat": {
+      "type": "string",
+      "description": "Geometry format",
+      "enum": ["xyz", "cjson"]
+    },
+    "genericFormat": {
+      "type": "string",
+      "description": "Generic format",
+      "enum": ["csv", "json", "xml"]
+    }
+  },
+
+  "type": "object",
+  "properties": {
+    "name": {
+      "description": "The name of the code",
+      "type": "string"
+    },
+    "version": {
+      "description": "The version of the code",
+      "type": "string"
+    },
+    "description": {
+      "description": "A description of the code",
+      "type": "string"
+    },
+    "input": {
+      "description": "A description of the input this code expects/can handle.",
+      "type": "object",
+      "properties": {
+        "geometry": {
+            "type": "object",
+            "description": "The geometry of a structure.",
+            "properties": {
+              "format": { "$ref": "#/definitions/geometryFormat" }
+            }
+        }
+      }
+    },
+    "output": {
+      "description": "A description of the output format this code products.",
+      "type": "object",
+      "properties": {
+        "format": {
+           "oneOf": [{
+              "$ref": "#/definitions/geometryFormat"
+            }, {
+              "$ref": "#/definitions/genericFormat"
+            }
+         ]
+      }
+    }
+  },
+  "required": [ "name", "input", "output" ]
+}
