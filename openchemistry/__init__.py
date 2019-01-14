@@ -110,8 +110,7 @@ def _submit_calculation(cluster_id, pending_calculation_id, optimize, calculatio
         'taskFlowClass': taskflow_class,
         'meta': {
             'code': code_label,
-            'calculationId': pending_calculation_id,
-            'queueId': queue['_id']
+            'calculationId': pending_calculation_id
         }
     }
 
