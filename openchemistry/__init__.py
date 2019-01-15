@@ -138,8 +138,8 @@ def _submit_calculation(cluster_id, pending_calculation_id, optimize, calculatio
             'name': 'cori'
         }
 
-    girder_client.post('queues/%s/add/%s' % (queue['_id'], taskflow['_id']), json=body)
-    girder_client.post('queues/%s/pop' % queue['_id'], parameters={'multi': True})
+    girder_client.put('queues/%s/add/%s' % (queue['_id'], taskflow['_id']), json=body)
+    girder_client.put('queues/%s/pop' % queue['_id'], parameters={'multi': True})
 
     return taskflow['_id']
 
