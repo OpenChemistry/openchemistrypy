@@ -221,7 +221,7 @@ def _fetch_or_create_queue():
     if (len(queue) > 0):
         queue = queue[0]
     else:
-        params = {'name': 'oc_queue', 'max_running': 2}
+        params = {'name': 'oc_queue', 'maxRunning': 5}
         queue = girder_client.post('queues', parameters=params)
 
     return queue
