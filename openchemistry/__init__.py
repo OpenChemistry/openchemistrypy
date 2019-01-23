@@ -666,24 +666,26 @@ class AttributeInterceptor(object):
         self._value = value
         self._intercept_func = intercept_func
 
+    def unwrap(self):
+        return self._wrapped
 
-    def __getattribute__(self, name):
+    def __getattr__(self, name):
         # Use object's implementation to get attributes, otherwise
         # we will get recursion
         _wrapped = object.__getattribute__(self, '_wrapped')
         _value = object.__getattribute__(self, '_value')
-        intercept_func = object.__getattribute__(self, '_intercept_func')
+        _intercept_func = object.__getattribute__(self, '_intercept_func')
 
-        if intercept_func() and hasattr(_wrapped, name):
-            attr = object.__getattribute__(_wrapped, name)
+        attr = object.__getattribute__(_wrapped, name)
+        if _intercept_func():
             if inspect.ismethod(attr):
                 def pending(*args, **kwargs):
                     return _value
                 return pending
             else:
-                return AttributeInterceptor(attr, _value, intercept_func)
+                return AttributeInterceptor(attr, _value, _intercept_func)
         else:
-            return object.__getattribute__(_wrapped, name)
+            return attr
 
 class PendingCalculationResultWrapper(AttributeInterceptor):
     def __init__(self, calculation, taskflow_id=None):
@@ -934,6 +936,21 @@ def load(data):
         raise TypeError("Load accepts either a cjson dict, or an avogadro.core.Molecule")
     return Molecule(provider)
 
+def monitor(results):
+    taskflow_ids = []
+
+    for result in results:
+        if hasattr(result, '_properties'):
+            props = result._properties
+            if isinstance(props, AttributeInterceptor):
+                props = props.unwrap()
+            if isinstance(props, dict):
+                taskflow_id = props.get('taskFlowId')
+                if taskflow_id is not None:
+                    taskflow_ids.append(taskflow_id)
+
+    return _calculation_monitor(taskflow_ids)
+
 def queue():
     if girder_host is None:
         import warnings
@@ -952,6 +969,9 @@ def queue():
 
     taskflow_ids = running + pending
 
+    return _calculation_monitor(taskflow_ids)
+
+def _calculation_monitor(taskflow_ids):
     try:
         from .notebook import CalculationMonitor
         table = CalculationMonitor({
