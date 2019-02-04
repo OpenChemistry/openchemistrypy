@@ -104,16 +104,21 @@ def _submit_calculation(cluster_id, pending_calculation_id, optimize, calculatio
     taskflow_class = code_params[code]['class']
 
     # Create the taskflow
+    queue = _fetch_or_create_queue()
+
     body = {
         'taskFlowClass': taskflow_class,
         'meta': {
-            'code': code_label
+            'code': code_label,
+            'calculationId': pending_calculation_id
         }
     }
+
     if calculation_types is not None:
         body['meta']['type'] = calculation_types
 
     taskflow = girder_client.post('taskflows', json=body)
+
     # Start the taskflow
     body = {
         'input': {
@@ -133,13 +138,8 @@ def _submit_calculation(cluster_id, pending_calculation_id, optimize, calculatio
             'name': 'cori'
         }
 
-    girder_client.put('taskflows/%s/start' % taskflow['_id'], json=body)
-
-    # Set the pending calculation id in the meta data
-    body = {
-        'meta.calculationId': pending_calculation_id
-    }
-    girder_client.patch('taskflows/%s' % taskflow['_id'], json=body)
+    girder_client.put('queues/%s/add/%s' % (queue['_id'], taskflow['_id']), json=body)
+    girder_client.put('queues/%s/pop' % queue['_id'], parameters={'multi': True})
 
     return taskflow['_id']
 
@@ -213,6 +213,18 @@ def _fetch_or_submit_calculation(molecule_id, type_, basis=None, theory=None, fu
                             json=body)
 
     return calculation
+
+def _fetch_or_create_queue():
+    params = {'name': 'oc_queue'}
+    queue = girder_client.get('queues', parameters=params)
+
+    if (len(queue) > 0):
+        queue = queue[0]
+    else:
+        params = {'name': 'oc_queue', 'maxRunning': 5}
+        queue = girder_client.post('queues', parameters=params)
+
+    return queue
 
 def _optimize(molecule_id, basis=None, theory=None, functional=None, input_geometry=None, code='nwchem'):
     type_ = 'optimization'
@@ -654,24 +666,26 @@ class AttributeInterceptor(object):
         self._value = value
         self._intercept_func = intercept_func
 
+    def unwrap(self):
+        return self._wrapped
 
-    def __getattribute__(self, name):
+    def __getattr__(self, name):
         # Use object's implementation to get attributes, otherwise
         # we will get recursion
         _wrapped = object.__getattribute__(self, '_wrapped')
         _value = object.__getattribute__(self, '_value')
-        intercept_func = object.__getattribute__(self, '_intercept_func')
+        _intercept_func = object.__getattribute__(self, '_intercept_func')
 
-        if intercept_func() and hasattr(_wrapped, name):
-            attr = object.__getattribute__(_wrapped, name)
+        attr = object.__getattribute__(_wrapped, name)
+        if _intercept_func():
             if inspect.ismethod(attr):
                 def pending(*args, **kwargs):
                     return _value
                 return pending
             else:
-                return AttributeInterceptor(attr, _value, intercept_func)
+                return AttributeInterceptor(attr, _value, _intercept_func)
         else:
-            return object.__getattribute__(_wrapped, name)
+            return attr
 
 class PendingCalculationResultWrapper(AttributeInterceptor):
     def __init__(self, calculation, taskflow_id=None):
@@ -921,3 +935,51 @@ def load(data):
     else:
         raise TypeError("Load accepts either a cjson dict, or an avogadro.core.Molecule")
     return Molecule(provider)
+
+def monitor(results):
+    taskflow_ids = []
+
+    for result in results:
+        if hasattr(result, '_properties'):
+            props = result._properties
+            if isinstance(props, AttributeInterceptor):
+                props = props.unwrap()
+            if isinstance(props, dict):
+                taskflow_id = props.get('taskFlowId')
+                if taskflow_id is not None:
+                    taskflow_ids.append(taskflow_id)
+
+    return _calculation_monitor(taskflow_ids)
+
+def queue():
+    if girder_host is None:
+        import warnings
+        warnings.warn("Cannot displaying pending calculations, the notebook is not running in a Girder environment")
+        return
+
+    queue = _fetch_or_create_queue()
+    running = []
+    pending = []
+
+    for taskflow_id, status in queue['taskflows'].items():
+        if status == 'pending':
+            pending.append(taskflow_id)
+        elif status == 'running':
+            running.append(taskflow_id)
+
+    taskflow_ids = running + pending
+
+    return _calculation_monitor(taskflow_ids)
+
+def _calculation_monitor(taskflow_ids):
+    try:
+        from .notebook import CalculationMonitor
+        table = CalculationMonitor({
+            'taskFlowIds': taskflow_ids,
+            'girderToken': girder_client.token
+        })
+    except ImportError:
+        # Outside notebook just print message
+        table = 'Pending calculations .... '
+
+    return table
