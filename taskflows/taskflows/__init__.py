@@ -180,6 +180,7 @@ def _create_description_job(task, cluster, description_folder, container_name):
               'path': '.'
             }
         ],
+        'uploadOutput': False,
         'params': params
     }
 
@@ -199,6 +200,8 @@ def postprocess_description(task, _, input_, cluster, container_name, root_folde
 
     # Refresh state of job
     description_job = client.get('jobs/%s' % description_job['_id'])
+
+    upload_job_output_to_folder(cluster, description_job, girder_token=task.taskflow.girder_token)
 
     description_items = list(client.listItem(description_folder['_id']))
 
@@ -343,6 +346,7 @@ def _create_job_demo(task, cluster, container_name, container_description, input
               'path': './scratch'
             }
         ],
+        'uploadOutput': False,
         'params': {
             'taskFlowId': task.taskflow.id
         }
@@ -403,6 +407,8 @@ def postprocess_job(task, _, input_, cluster, container_name, root_folder, conta
 
     # Refresh state of job
     job = client.get('jobs/%s' % job['_id'])
+
+    upload_job_output_to_folder(cluster, job, girder_token=task.taskflow.girder_token)
 
     # remove temporary input folder folder, this data is attached to the calculation model
     client.delete('folder/%s' % input_folder['_id'])
