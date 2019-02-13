@@ -16,10 +16,11 @@ import datetime
 import json
 from io import BytesIO
 import tempfile
+import re
 
-from abc import ABC, abstractmethod
+from .utils import cjson_to_xyz
 
-class OpenChemistryTaskFlow(TaskFlow, ABC):
+class OpenChemistryTaskFlow(TaskFlow):
     """
     {
         "input": {
@@ -29,7 +30,8 @@ class OpenChemistryTaskFlow(TaskFlow, ABC):
         },
         "cluster": {
             "_id": <id of cluster to run on>
-        }
+        },
+        "containerName": <The docker image name used to run the calculation>
     }
     """
 
@@ -37,12 +39,16 @@ class OpenChemistryTaskFlow(TaskFlow, ABC):
         user = getCurrentUser()
         input_ = kwargs.get('input')
         cluster = kwargs.get('cluster')
+        container_name = kwargs.get('containerName')
 
         if input_ is None:
             raise Exception('Unable to extract input.')
 
         if '_id' not in cluster and 'name' not in cluster:
             raise Exception('Unable to extract cluster.')
+
+        if container_name is None:
+            raise Exception('Unable to extract the docker image name.')
 
         cluster_id = parse('cluster._id').find(kwargs)
         if cluster_id:
@@ -52,43 +58,8 @@ class OpenChemistryTaskFlow(TaskFlow, ABC):
             cluster = model.filter(cluster, user, passphrase=False)
 
         super(OpenChemistryTaskFlow, self).start(
-            setup_input_template.s(input_, cluster),
+            start.s(input_, cluster, container_name),
             *args, **kwargs)
-
-    @property
-    @abstractmethod
-    def code_label(self):
-        pass
-
-    @property
-    @abstractmethod
-    def docker_image(self):
-        pass
-
-    @abstractmethod
-    def input_generator(self, params, cjson, tmp_file):
-        pass
-
-    @abstractmethod
-    def select_output_files(self, filenames):
-        pass
-
-    def ec2_job_commands(self, input_name):
-        return self.demo_job_commands(input_name)
-
-    def demo_job_commands(self, input_name):
-        mount_dir = '/data'
-        return [
-            'docker pull %s' % self.docker_image,
-            'docker run -v dev_job_data:%s %s %s' % (
-                mount_dir,
-                self.docker_image,
-                os.path.join(mount_dir, '{{job._id}}', input_name)
-            )
-        ]
-
-    def nersc_job_commands(self, input_name):
-        raise NotImplementedError('%s has not been configured to run on NERSC yet.' % self.code_label)
 
 def _get_cori(client):
     params = {
@@ -143,9 +114,16 @@ def _fetch_best_geometry(client, molecule_id):
 
     return calculations[0]
 
-
 @cumulus.taskflow.task
-def setup_input_template(task, input_, cluster):
+def start(task, input_, cluster, container_name):
+    """
+    The flow is the following:
+    - Dry run the container with the -d flag to obtain a description of the input/output formats
+    - Convert the cjson input geometry to conform to the container's expected format
+    - Run the container
+    - Convert the container output format into cjson
+    - Ingest the output in the database
+    """
     client = create_girder_client(
         task.taskflow.girder_api_url, task.taskflow.girder_token)
 
@@ -155,196 +133,218 @@ def setup_input_template(task, input_, cluster):
     if '_id' not in cluster:
         raise Exception('Invalid cluster configurations: %s' % cluster)
 
-    optimize = input_['optimize']
+    oc_folder = _get_oc_folder(client)
+    root_folder = client.createFolder(oc_folder['_id'],
+                                    datetime.datetime.now().strftime("%Y_%m_%d-%H_%M_%f"))
+    # temporary folder to save the container in/out description
+    description_folder = client.createFolder(root_folder['_id'],
+                                    'description')
+
+    job = _create_description_job(task, cluster, description_folder, container_name)
+
+    try:
+        submit_job(cluster, job, girder_token=task.taskflow.girder_token, monitor=False)
+    except:
+        import traceback
+        traceback.print_exc()
+
+    monitor_job.apply_async((cluster, job), {'girder_token': task.taskflow.girder_token,
+                                             'monitor_interval': 10},
+                            link=postprocess_description.s(input_, cluster, container_name, root_folder, job, description_folder))
+
+def _create_description_job(task, cluster, description_folder, container_name):
+    if _nersc(cluster):
+        raise NotImplementedError('Cannot run docker containers on NERSC')
+    else:
+        params = {
+            'taskFlowId': task.taskflow.id
+        }
+
+        output_file = 'description.json'
+
+        commands = [
+            'docker pull %s' % container_name,
+            'docker run %s -d > %s' % ( container_name, output_file )
+        ]
+
+    body = {
+        # ensure there are no special characters in the submission script name
+        'name': 'desc_%s' % re.sub('[^a-zA-Z0-9]', '_', container_name),
+        'commands': commands,
+        'input': [
+
+        ],
+        'output': [
+            {
+              'folderId': description_folder['_id'],
+              'path': '.'
+            }
+        ],
+        'params': params
+    }
+
+    client = create_girder_client(
+                task.taskflow.girder_api_url, task.taskflow.girder_token)
+
+    job = client.post('jobs', data=json.dumps(body))
+
+    return job
+
+@cumulus.taskflow.task
+def postprocess_description(task, _, input_, cluster, container_name, root_folder, description_job, description_folder):
+    task.taskflow.logger.info('Processing description job output.')
+
+    client = create_girder_client(
+        task.taskflow.girder_api_url, task.taskflow.girder_token)
+
+    # Refresh state of job
+    description_job = client.get('jobs/%s' % description_job['_id'])
+
+    description_items = list(client.listItem(description_folder['_id']))
+
+    description_file = None
+    for item in description_items:
+        if item['name'].endswith('.json'):
+            files = list(client.listFile(item['_id']))
+            if len(files) != 1:
+                raise Exception('Expecting a single file under item, found: %s' + len(files))
+            description_file = files[0]
+            break
+
+    if description_file is None:
+        raise Exception('The container does not implement correctly the --description flag')
+
+    with tempfile.TemporaryFile() as tf:
+        client.downloadFile(description_file['_id'], tf)
+        tf.seek(0)
+        container_description = json.loads(tf.read().decode())
+
+    # remove temporary description folder
+    client.delete('folder/%s' % description_folder['_id'])
+
+    setup_input.delay(input_, cluster, container_name, root_folder, container_description)
+
+@cumulus.taskflow.task
+def setup_input(task, input_, cluster, container_name, root_folder, container_description):
+    task.taskflow.logger.info('Setting up calculation input.')
+
+    client = create_girder_client(
+        task.taskflow.girder_api_url, task.taskflow.girder_token)
+
+    if cluster.get('name') == 'cori':
+        cluster = _get_cori(client)
+
+    if '_id' not in cluster:
+        raise Exception('Invalid cluster configurations: %s' % cluster)
+
     calculation_id = parse('calculation._id').find(input_)
     if not calculation_id:
         raise Exception('Unable to extract calculation id.')
+
     calculation_id = calculation_id[0].value
     calculation = client.get('calculations/%s' % calculation_id)
     molecule_id = calculation['moleculeId']
 
-    optimization_calculation_id = None
-    input_calculation = parse('properties.input.calculationId').find(calculation)
-    # We have been asked to use a specific calculation
-    if input_calculation:
-        optimization_calculation_id = input_calculation[0].value
-    # We have been asked to use a specific optimized geometry, see if we have it
-    elif optimize:
-        parameters = {
-            'moleculeId': molecule_id,
-            'calculationType': 'optimizations',
-        }
+    input_parameters = calculation.get('properties').get('inputParameters', {})
 
-        basis = parse('properties.basisSet.name').find(calculation)
-        if basis:
-            parameters['basis'] = basis[0].value
-
-        functional = parse('properties.functional').find(calculation)
-        if functional:
-            parameters['functional'] = functional[0].value.lower()
-
-        theory = parse('properties.theory').find(calculation)
-        if theory:
-            parameters['theory'] = theory[0].value.lower()
-
-
-        calculations = client.get('calculations', parameters)
-
-        if len(calculations) > 0:
-            optimization_calculation_id = calculations[0]['_id']
-
-    best_calc = None
-    if optimization_calculation_id is None:
-        best_calc = _fetch_best_geometry(client, molecule_id)
-
-    # We are using a specific one
-    if optimization_calculation_id is not None:
-        r = client.get('calculations/%s/cjson' % optimization_calculation_id,
-                    jsonResp=False)
-        cjson = r.json()
-    # If we have not calculations then just use the geometry stored in molecules
-    elif best_calc is None:
+    # Fetch the starting geometry
+    input_geometry = calculation.get('inputGeometry', None)
+    if input_geometry is None:
         r = client.get('molecules/%s/cjson' % molecule_id, jsonResp=False)
         cjson = r.json()
-        # As we might be using an unoptimized structure add the optimize step
-        if 'optimization' not in calculation['properties']['calculationTypes']:
-            calculation['properties']['calculationTypes'].append('optimization')
-    # Fetch xyz for best geometry
     else:
-        optimization_calculation_id = best_calc['_id']
-        r = client.get('calculations/%s/cjson' % optimization_calculation_id,
-                    jsonResp=False)
-        cjson = r.json()
+        # TODO: implement the path where a specific input geometry exists
+        raise NotImplementedError('Running a calculation with a specific geometry is not implemented yet.')
 
-    # If we are using an existing calculation as the input geometry record it
-    if optimization_calculation_id is not None:
-        props = calculation['properties']
-        props['input'] = {
-            'calculationId': optimization_calculation_id
-        }
-        calculation = client.put('calculations/%s/properties' % calculation['_id'],
-                                json=props)
+    input_format = container_description['input']['format']
+    output_format = container_description['output']['format']
 
-    oc_folder = _get_oc_folder(client)
-    run_folder = client.createFolder(oc_folder['_id'],
-                                    datetime.datetime.now().strftime("%Y_%m_%d-%H_%M_%f"))
-    input_folder = client.createFolder(run_folder['_id'],
-                                    'input')
+    # The folder where the input geometry and input parameters are
+    input_folder = client.createFolder(root_folder['_id'], 'input')
+    # The folder where the converted output will be at the end of the job
+    output_folder = client.createFolder(root_folder['_id'], 'output')
+    # The folder where the raw input/output files of the specific code are stored
+    scratch_folder = client.createFolder(root_folder['_id'], 'scratch')
 
-    # Generate input file
-    params = {}
-    calculation_types = parse('properties.calculationTypes').find(calculation)
-    if calculation_types:
-        calculation_types = calculation_types[0].value
-
-    for calculation_type in calculation_types:
-        params[calculation_type] = True
-
-    # If we have been asked to use a optimized structure make sure we
-    # run the optimization if we couldn't find calculation.
-    if optimize and optimization_calculation_id is None:
-        params['optimization'] = True
-
-    basis = parse('properties.basisSet.name').find(calculation)
-    if basis:
-        params['basis'] = basis[0].value
-
-    functional = parse('properties.functional').find(calculation)
-    if functional:
-        params['functional'] = functional[0].value.lower()
-
-    theory = parse('properties.theory').find(calculation)
-    if theory:
-        params['theory'] = theory[0].value.lower()
-
+    # Save the input parameters to file
     with tempfile.TemporaryFile() as fp:
-        task.taskflow.input_generator(params, cjson, fp)
-        
+        fp.write(json.dumps(input_parameters).encode())
         # Get the size of the file
         size = fp.seek(0, 2)
         fp.seek(0)
-        name = 'oc.%s.in' % task.taskflow.code_label
-        input_file = client.uploadFile(input_folder['_id'],  fp, name, size,
+        name = 'input_parameters.json'
+        input_parameters_file = client.uploadFile(input_folder['_id'],  fp, name, size,
                                     parentType='folder')
 
-    submit_template.delay(input_, cluster, run_folder, input_file, input_folder)
+    # Save the input geometry to file
+    with tempfile.TemporaryFile() as fp:
+        content = _convert_geometry(cjson, input_format)
+        fp.write(content.encode())
+        # Get the size of the file
+        size = fp.seek(0, 2)
+        fp.seek(0)
+        name = 'geometry.%s' % input_format
+        input_geometry_file = client.uploadFile(input_folder['_id'],  fp, name, size,
+                                    parentType='folder')
 
-def _create_job_ec2(task, cluster, input_file, input_folder):
-    task.taskflow.logger.info('Create %s job' % task.taskflow.code_label)
-    input_name = input_file['name']
+    submit_calculation.delay(input_, cluster, container_name, root_folder, container_description, input_folder, output_folder, scratch_folder)
+
+def _convert_geometry(cjson, input_format):
+    if input_format.lower() == 'xyz':
+        return cjson_to_xyz(cjson)
+    elif input_format.lower() == 'cjson':
+        return json.dumps(cjson)
+    else:
+        raise Exception('The container is requesting an unsupported geometry format %s') % input_format
+
+def _create_job_ec2(task, cluster, container_name, container_description, input_folder, output_folder, scratch_folder):
+    return _create_job_demo(task, cluster, container_name, container_description, input_folder, output_folder, scratch_folder)
+
+def _create_job_demo(task, cluster, container_name, container_description, input_folder, output_folder, scratch_folder):
+    task.taskflow.logger.info('Create %s job' % container_name)
+
+    local_dir = 'dev_job_data'
+    mount_dir = '/data'
+
+    input_format = container_description['input']['format']
+    output_format = container_description['output']['format']
+
+    input_dir = os.path.join(mount_dir, '{{job._id}}', 'input')
+    output_dir = os.path.join(mount_dir, '{{job._id}}', 'output')
+    scratch_dir = os.path.join(mount_dir, '{{job._id}}', 'scratch')
+
+    geometry_filename = os.path.join(input_dir, 'geometry.%s' % input_format)
+    parameters_filename = os.path.join(input_dir, 'input_parameters.json')
+    output_filename = os.path.join(output_dir, 'output.%s' % output_format)
 
     body = {
-        'name': '%s_run' % task.taskflow.code_label,
-        'commands': task.taskflow.ec2_job_commands(input_name),
+        # ensure there are no special characters in the submission script name
+        'name': 'run_%s' % re.sub('[^a-zA-Z0-9]', '_', container_name),
+        'commands': [
+            'mkdir output',
+            'mkdir scratch',
+            'docker run -v %s:%s %s -g %s -p %s -o %s -s %s' % (
+                local_dir, mount_dir, container_name,  geometry_filename, parameters_filename, output_filename, scratch_dir
+            )
+        ],
         'input': [
             {
               'folderId': input_folder['_id'],
-              'path': '.'
+              'path': './input'
             }
         ],
-        'output': [],
+        'output': [
+            {
+              'folderId': output_folder['_id'],
+              'path': './output'
+            },
+            {
+              'folderId': scratch_folder['_id'],
+              'path': './scratch'
+            }
+        ],
         'params': {
             'taskFlowId': task.taskflow.id
-        }
-    }
-
-    client = create_girder_client(
-                task.taskflow.girder_api_url, task.taskflow.girder_token)
-
-    job = client.post('jobs', data=json.dumps(body))
-    task.taskflow.set_metadata('jobs', [job])
-
-    return job
-
-def _create_job_demo(task, cluster, input_file, input_folder):
-    task.taskflow.logger.info('Create %s job' % task.taskflow.code_label)
-    input_name = input_file['name']
-
-    body = {
-        'name': '%s_run' % task.taskflow.code_label,
-        'commands': task.taskflow.demo_job_commands(input_name),
-        'input': [
-            {
-              'folderId': input_folder['_id'],
-              'path': '.'
-            }
-        ],
-        'output': [],
-        'params': {
-            'taskFlowId': task.taskflow.id
-        }
-    }
-
-    client = create_girder_client(
-                task.taskflow.girder_api_url, task.taskflow.girder_token)
-
-    job = client.post('jobs', data=json.dumps(body))
-    task.taskflow.set_metadata('jobs', [job])
-
-    return job
-
-
-
-def _create_job_nersc(task, cluster, input_file, input_folder):
-    task.taskflow.logger.info('Create %s job' % task.taskflow.code_label)
-    input_name = input_file['name']
-
-    body = {
-        'name': '%s_run' % task.taskflow.code_label,
-        'commands': task.taskflow.nersc_job_commands(input_name),
-        'input': [
-            {
-              'folderId': input_folder['_id'],
-              'path': '.'
-            }
-        ],
-        'output': [],
-        'params': {
-            'taskFlowId': task.taskflow.id,
-            'numberOfNodes': 1,
-            'queue': 'debug',
-            'constraint': 'haswell',
-            'account': os.environ.get('OC_ACCOUNT')
         }
     }
 
@@ -362,18 +362,17 @@ def _nersc(cluster):
 def _demo(cluster):
     return cluster.get('name') == 'demo_cluster'
 
-def _create_job(task, cluster, input_file, input_folder):
+def _create_job(task, cluster, container_name, container_description, input_folder, output_folder, scratch_folder):
     if _nersc(cluster):
-        return _create_job_nersc(task, cluster, input_file, input_folder)
+        raise NotImplementedError('Cannot run docker containers on NERSC')
     elif _demo(cluster):
-        return _create_job_demo(task, cluster, input_file, input_folder)
+        return _create_job_demo(task, cluster, container_name, container_description, input_folder, output_folder, scratch_folder)
     else:
-        return _create_job_ec2(task, cluster, input_file, input_folder)
-
+        return _create_job_ec2(task, cluster, container_name, container_description, input_folder, output_folder, scratch_folder)
 
 @cumulus.taskflow.task
-def submit_template(task, input_, cluster, run_folder, input_file, input_folder):
-    job = _create_job(task, cluster, input_file, input_folder)
+def submit_calculation(task, input_, cluster, container_name, root_folder, container_description, input_folder, output_folder, scratch_folder):
+    job = _create_job(task, cluster, container_name, container_description, input_folder, output_folder, scratch_folder)
 
     girder_token = task.taskflow.girder_token
     task.taskflow.set_metadata('cluster', cluster)
@@ -385,7 +384,6 @@ def submit_template(task, input_, cluster, run_folder, input_file, input_folder)
     task.taskflow.logger.info('Downloading complete.')
 
     task.taskflow.logger.info('Submitting job %s to cluster.' % job['_id'])
-    girder_token = task.taskflow.girder_token
 
     try:
         submit_job(cluster, job, girder_token=girder_token, monitor=False)
@@ -395,46 +393,39 @@ def submit_template(task, input_, cluster, run_folder, input_file, input_folder)
 
     monitor_job.apply_async((cluster, job), {'girder_token': girder_token,
                                              'monitor_interval': 10},
-                            link=postprocess_template.s(run_folder, input_, cluster, job))
-
+                            link=postprocess_job.s(input_, cluster, container_name, root_folder, container_description, input_folder, output_folder, scratch_folder, job))
 
 @cumulus.taskflow.task
-def postprocess_template(task, _, run_folder, input_, cluster, job):
-    task.taskflow.logger.info('Uploading results from cluster')
-
+def postprocess_job(task, _, input_, cluster, container_name, root_folder, container_description, input_folder, output_folder, scratch_folder, job):
+    task.taskflow.logger.info('Processing the results of the job.')
     client = create_girder_client(
         task.taskflow.girder_api_url, task.taskflow.girder_token)
 
-    output_folder = client.createFolder(run_folder['_id'],
-                                       'output')
     # Refresh state of job
     job = client.get('jobs/%s' % job['_id'])
-    job['output'] = [{
-        'folderId': output_folder['_id'],
-        'path': '.'
-    }]
 
-    upload_job_output_to_folder(cluster, job, girder_token=task.taskflow.girder_token)
+    # remove temporary input folder folder, this data is attached to the calculation model
+    client.delete('folder/%s' % input_folder['_id'])
 
-    task.taskflow.logger.info('Upload job output complete.')
-
-    input_file_name = task.taskflow.get_metadata('inputFileName')
-    input_file_name
-
+    # ingest the output of the calculation
+    output_format = container_description['output']['format']
+    output_file = None
     output_items = list(client.listItem(output_folder['_id']))
-    output_filenames = [item['name'] for item in output_items]
-    do_copy = task.taskflow.select_output_files(output_filenames)
-    # Call to ingest the files
-    for item, copy in zip(output_items, do_copy):
-        if copy:
+    for item in output_items:
+        if item['name'] == 'output.%s' % output_format:
             files = list(client.listFile(item['_id']))
             if len(files) != 1:
                 raise Exception('Expecting a single file under item, found: %s' + len(files))
+            output_file = files[0]
+            break
 
-            json_output_file_id = files[0]['_id']
-            # Now call endpoint to ingest result
-            body = {
-                'fileId': json_output_file_id,
-                'public': True
-            }
-            client.put('calculations/%s' % input_['calculation']['_id'], json=body)
+    if output_file is None:
+        raise Exception('The calculation did not produce any output file.')
+
+    # Now call endpoint to ingest result
+    body = {
+        'fileId': output_file['_id'],
+        'format': output_format,
+        'public': True
+    }
+    client.put('calculations/%s' % input_['calculation']['_id'], json=body)
