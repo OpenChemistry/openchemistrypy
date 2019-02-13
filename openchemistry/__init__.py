@@ -14,6 +14,7 @@ import avogadro
 
 from .io.psi4 import Psi4Reader
 from .io.nwchemJson import NWChemJsonReader
+from .io.cjson import CjsonReader
 
 girder_host = os.environ.get('GIRDER_HOST')
 girder_port = os.environ.get('GIRDER_PORT')
