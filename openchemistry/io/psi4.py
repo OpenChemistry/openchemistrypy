@@ -74,7 +74,7 @@ class Psi4Reader(BaseReader):
             if 'modes'  not in cjson['vibrations']:
                 cjson['vibrations']['modes'] = [i + 1 for i in range(len(cjson['vibrations']['frequencies']))]
 
-        
+
         # Convert calculation metadata
         if hasattr(data, 'metadata'):
             metadata = data.metadata

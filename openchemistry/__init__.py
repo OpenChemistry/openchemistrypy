@@ -9,7 +9,7 @@ import collections
 from abc import ABC, abstractmethod
 from jsonpath_rw import parse
 
-from .utils import lookup_file, calculate_mo
+from .utils import lookup_file, calculate_mo, hash_object
 import avogadro
 
 from .io.psi4 import Psi4Reader
@@ -37,40 +37,27 @@ if girder_host:
 
     girder_file = lookup_file(girder_client, jupyterhub_url)
 
-# TODO Need to use basis and theory
-def _fetch_calculation(molecule_id, type_=None, basis=None, theory=None, functional=None, code='nwchem'):
+def _fetch_calculation(molecule_id, container_name, input_parameters, input_geometry=None):
     parameters = {
         'moleculeId': molecule_id,
-        'sortByTheory': True
+        'containerName': container_name,
+        'inputParametersHash': hash_object(input_parameters)
     }
 
-    if type_ is not None:
-        parameters['calculationType'] = type_
-
-    if functional is not None:
-        parameters['functional'] = functional
-
-    if theory is not None:
-        parameters['theory'] = theory
-
-    if basis is not None:
-        parameters['basis'] = basis
-
-    if code is not None:
-        parameters['code'] = code
+    if input_geometry:
+        parameters['inputGeometryHash'] = hash_object(input_geometry)
 
     calculations = girder_client.get('calculations', parameters)
 
     if len(calculations) < 1:
         return None
 
-    # Pick the "best"
     return calculations[0]
 
 def _nersc():
     return os.environ.get('OC_SITE') == 'NERSC'
 
-def _submit_calculation(cluster_id, pending_calculation_id, optimize, calculation_types=None, code='nwchem'):
+def _submit_calculation(cluster_id, pending_calculation_id, container_name):
     if cluster_id is None and not _nersc():
         # Try to get demo cluster
         params = {
@@ -83,40 +70,16 @@ def _submit_calculation(cluster_id, pending_calculation_id, optimize, calculatio
         else:
             raise Exception('Unable to submit calculation, no cluster configured.')
 
-    code_params = {
-        'nwchem': {
-            'label': 'NWChem (version 27327)',
-            'class': 'taskflows.nwchem.NWChemTaskFlow'
-        },
-        'psi4': {
-            'label': 'PSI4 (version 1.2.1)',
-            'class': 'taskflows.psi4.Psi4TaskFlow'
-        },
-        'chemml': {
-            'label': 'ChemML',
-            'class': 'taskflows.chemml.ChemmlTaskFlow'
-        }
-    }
-
-    if code not in code_params:
-        raise Exception('Unable to submit calculation with the %s code' % code)
-
-    code_label = code_params[code]['label']
-    taskflow_class = code_params[code]['class']
-
     # Create the taskflow
     queue = _fetch_or_create_queue()
 
     body = {
-        'taskFlowClass': taskflow_class,
+        'taskFlowClass': 'taskflows.OpenChemistryTaskFlow',
         'meta': {
-            'code': code_label,
-            'calculationId': pending_calculation_id
+            'calculationId': pending_calculation_id,
+            'containerName': container_name
         }
     }
-
-    if calculation_types is not None:
-        body['meta']['type'] = calculation_types
 
     taskflow = girder_client.post('taskflows', json=body)
 
@@ -125,9 +88,9 @@ def _submit_calculation(cluster_id, pending_calculation_id, optimize, calculatio
         'input': {
             'calculation': {
                 '_id': pending_calculation_id
-            },
-            'optimize': optimize
-        }
+            }
+        },
+        'containerName': container_name
     }
 
     if cluster_id is not None:
@@ -149,64 +112,42 @@ def _fetch_taskflow_status(taskflow_id):
 
     return r['status']
 
-def _create_pending_calculation(molecule_id, type_, basis=None, theory=None, functional=None,
-                                input_geometry=None, code='nwchem'):
-    if not isinstance(type_, list):
-        type_ = [type_]
+def _create_pending_calculation(molecule_id, container_name, input_parameters, input_geometry=None):
 
     body = {
         'moleculeId': molecule_id,
         'cjson': None,
         'public': True,
         'properties': {
-            'calculationTypes': type_,
-            'pending': True,
-            'code': code
+            'pending': True
         },
+        'containerName': container_name,
+        'inputParameters': input_parameters,
         'notebooks': [girder_file['_id']]
     }
 
-    if basis is not None:
-        body['properties']['basisSet'] = {
-            'name': basis.lower()
-        }
-
-    if theory is not None:
-        body['properties']['theory'] = theory.lower()
-
     if input_geometry is not None:
-        body['properties']['input'] = {
-            'calculationId': input_geometry
-        }
-
-    if functional is not None:
-        body['properties']['functional'] = functional.lower()
+        body['inputGeometry'] = input_geometry
 
     calculation = girder_client.post('calculations', json=body)
 
     return calculation
 
-def _fetch_or_submit_calculation(molecule_id, type_, basis=None, theory=None, functional=None, optimize=False,
-                                 input_geometry=None, code='nwchem'):
+def _fetch_or_submit_calculation(molecule_id, container_name, input_parameters, input_geometry=None):
     global cluster_id
-    # If a functional has been provided default theory to dft
-    if theory is None and functional is not None:
-        theory = 'dft'
 
-    calculation = _fetch_calculation(molecule_id, type_, basis, theory, functional, code=code)
+    calculation = _fetch_calculation(molecule_id, container_name, input_parameters, input_geometry)
     taskflow_id = None
 
     if calculation is None:
-        calculation = _create_pending_calculation(molecule_id, type_, basis,
-                                                  theory, functional, input_geometry=input_geometry, code=code)
-        calculation_types = parse('properties.calculationTypes').find(calculation)[0].value
-        taskflow_id = _submit_calculation(cluster_id, calculation['_id'], optimize, calculation_types, code=code)
+        calculation = _create_pending_calculation(molecule_id, container_name, input_parameters, input_geometry)
+        taskflow_id = _submit_calculation(cluster_id, calculation['_id'], container_name)
         # Patch calculation to include taskflow id
         props = calculation['properties']
         props['taskFlowId'] = taskflow_id
         calculation = girder_client.put('calculations/%s/properties' % calculation['_id'], json=props)
     else:
-        # If we all ready have a calculation tag it with this notebooks id
+        # If we already have a calculation tag it with this notebooks id
         body = {
             'notebooks': [girder_file['_id']]
         }
@@ -226,86 +167,6 @@ def _fetch_or_create_queue():
         queue = girder_client.post('queues', parameters=params)
 
     return queue
-
-def _optimize(molecule_id, basis=None, theory=None, functional=None, input_geometry=None, code='nwchem'):
-    type_ = 'optimization'
-    calculation =  _fetch_or_submit_calculation(molecule_id, type_, basis, theory,
-                                                functional, input_geometry=input_geometry, code=code)
-    pending = parse('properties.pending').find(calculation)
-    if pending:
-        pending = pending[0].value
-
-    taskflow_id = parse('properties.taskFlowId').find(calculation)
-    if taskflow_id:
-        taskflow_id = taskflow_id[0].value
-    else:
-        taskflow_id = None
-    calculation = CalculationResult(calculation['_id'], calculation['properties'], molecule_id)
-
-    if pending:
-        calculation = PendingCalculationResultWrapper(calculation, taskflow_id)
-
-    return calculation
-
-def _frequencies(molecule_id,  optimize=False, basis=None, theory=None,
-                 functional=None, input_geometry=None, code='nwchem'):
-    type_ = 'vibrational'
-    calculation = _fetch_or_submit_calculation(molecule_id, type_, basis, theory,
-                                               functional, optimize, input_geometry, code=code)
-    pending = parse('properties.pending').find(calculation)
-    if pending:
-        pending = pending[0].value
-
-    taskflow_id = parse('properties.taskFlowId').find(calculation)
-    if taskflow_id:
-        taskflow_id = taskflow_id[0].value
-    else:
-        taskflow_id = None
-    calculation = CalculationResult(calculation['_id'], calculation['properties'], molecule_id)
-
-    if pending:
-        calculation = PendingCalculationResultWrapper(calculation, taskflow_id)
-
-    return calculation
-
-def _energy(molecule_id, optimize=False, basis=None, theory=None, functional=None, input_geometry=None, code='nwchem'):
-    type_ = 'energy'
-    calculation = _fetch_or_submit_calculation(molecule_id, type_, basis, theory,
-                                               functional, optimize, input_geometry, code=code)
-    pending = parse('properties.pending').find(calculation)
-    if pending:
-        pending = pending[0].value
-
-    taskflow_id = parse('properties.taskFlowId').find(calculation)
-    if taskflow_id:
-        taskflow_id = taskflow_id[0].value
-    else:
-        taskflow_id = None
-    calculation = CalculationResult(calculation['_id'], calculation['properties'], molecule_id)
-
-    if pending:
-        calculation = PendingCalculationResultWrapper(calculation, taskflow_id)
-
-    return calculation
-
-def _predict(molecule_id, code='chemml'):
-    type_ = 'machine_learning'
-    calculation = _fetch_or_submit_calculation(molecule_id, type_, code=code)
-    pending = parse('properties.pending').find(calculation)
-    if pending:
-        pending = pending[0].value
-
-    taskflow_id = parse('properties.taskFlowId').find(calculation)
-    if taskflow_id:
-        taskflow_id = taskflow_id[0].value
-    else:
-        taskflow_id = None
-    calculation = CalculationResult(calculation['_id'], calculation['properties'], molecule_id)
-
-    if pending:
-        calculation = PendingCalculationResultWrapper(calculation, taskflow_id)
-
-    return calculation
 
 class Molecule(object):
     def __init__(self, provider):
@@ -349,17 +210,25 @@ class GirderMolecule(Molecule):
         super(GirderMolecule, self).__init__(CjsonProvider(cjson))
         self._id = _id
 
-    def optimize(self, basis=None, theory=None, functional=None, code='nwchem'):
-        return _optimize(self._id, basis, theory, functional, code=code)
+    def calculate(self, container_name, input_parameters, input_geometry=None):
+        molecule_id = self._id
+        calculation = _fetch_or_submit_calculation(molecule_id, container_name, input_parameters, input_geometry)
+        pending = parse('properties.pending').find(calculation)
+        if pending:
+            pending = pending[0].value
 
-    def frequencies(self, optimize=False, basis=None, theory=None, functional=None, code='nwchem'):
-        return _frequencies(self._id, optimize, basis, theory, functional, code=code)
+        taskflow_id = parse('properties.taskFlowId').find(calculation)
+        if taskflow_id:
+            taskflow_id = taskflow_id[0].value
+        else:
+            taskflow_id = None
 
-    def energy(self, optimize=False, basis=None, theory=None, functional=None, code='nwchem'):
-        return _energy(self._id, optimize, basis, theory, functional, code=code)
+        calculation = CalculationResult(calculation['_id'], calculation['properties'], molecule_id)
 
-    def predict(self, code='chemml'):
-        return _predict(self._id, code=code)
+        if pending:
+            calculation = PendingCalculationResultWrapper(calculation, taskflow_id)
+
+        return calculation
 
 class CalculationResult(Molecule):
 
@@ -569,7 +438,6 @@ class Visualization(ABC):
 
         return params
 
-
 class Structure(Visualization):
 
     def show(self, viewer='moljs', menu=True, **kwargs):
@@ -730,90 +598,6 @@ class Reaction(object):
     def equation(self):
         return '%s => %s' % (' + '.join(self.reactants), ' + '.join(self.products))
 
-    def _fetch_free_energy(self, formula, basis=None, theory=None, functional=None):
-        """
-        :return A tuple containing the total energy and zero point energy.
-        """
-
-        # First fetch the molecule using the formula
-        params = {
-            'formula': formula
-        }
-        mol = girder_client.get('molecules/search', parameters=params)
-
-        if len(mol) < 1:
-            raise Exception('No molecules found for formula \'%s\'' % formula)
-
-        # TODO Might we get more than one molecule with the same formula?
-
-        # Now fetch the calculations, TODO what types should we select
-        calculation = _fetch_or_submit_calculation(mol[0]['_id'], ['vibrational',
-                                                                   'energy'],
-                                                   basis, theory, functional)
-
-        pending = parse('properties.pending').find(calculation)
-        if pending:
-            pending = pending[0].value
-
-        if pending:
-            taskflow_id = parse('properties.taskFlowId').find(calculation)
-            taskflow_id = taskflow_id[0].value
-            return CalculationResult(calculation['_id'], calculation['properties'])
-
-        calcs = parse('properties.calculations').find(calculation)
-        if not calcs:
-            raise Exception('No calculations found for \'%s\'' % formula)
-
-        calcs = calcs[0].value
-
-        # TODO for now just select the first, which calculations should we
-        # favor? For now just search for the first that has both energies
-        selected_calc = None
-        for calc in calcs:
-            if 'totalEnergy' in calc and 'zeroPointEnergyCorrection' in calc:
-                selected_calc = calc
-                break
-
-        return (selected_calc['totalEnergy'], selected_calc['zeroPointEnergyCorrection'])
-
-    def free_energy(self, basis=None, theory=None, functional=None):
-
-        def _sum(formulas):
-            pending_calculations = []
-            energy = 0
-            for formula in formulas:
-                free_energy = self._fetch_free_energy(formula, basis, theory, functional)
-
-                if isinstance(free_energy, CalculationResult):
-                    pending_calculations.append(free_energy)
-                else:
-                    (total_energy, zero_point_energy) = free_energy
-                    energy += total_energy['value'] + zero_point_energy['value']
-
-            if len(pending_calculations) == 0:
-                return energy
-            else:
-                return pending_calculations
-
-        reactants_energy_total = _sum(self.reactants)
-        products_energy_total = _sum(self.products)
-
-        if isinstance(reactants_energy_total, list) or isinstance(products_energy_total, list):
-            pending_calculations = []
-            if isinstance(reactants_energy_total, list):
-                pending_calculations += reactants_energy_total
-
-            if isinstance(products_energy_total, list):
-                pending_calculations += products_energy_total
-
-            return pending_calculations
-
-        free_energy = products_energy_total - reactants_energy_total
-        # Convert to kJ/mol
-        free_energy = free_energy * 2625.5
-
-        return free_energy
-
 _inchi_key_regex = re.compile("^([0-9A-Z\-]+)$")
 
 def _is_inchi_key(identifier):
@@ -834,9 +618,8 @@ def _find_using_cactus(identifier):
     else:
         return None
 
-def find_structure(identifier, basis=None, theory=None, functional=None, code='nwchem'):
-    is_calc_query = (basis is not None or theory is not None
-                     or functional is not None)
+def find_structure(identifier, container_name=None, input_parameters=None, input_geometry=None):
+    is_calc_query = (container_name is not None and input_parameters is not None)
 
     # InChiKey?
     if _is_inchi_key(identifier):
@@ -846,8 +629,7 @@ def find_structure(identifier, basis=None, theory=None, functional=None, code='n
             # Are we search for a specific calculation?
             if is_calc_query:
                 # Look for optimization calculation
-                cal = _fetch_calculation(molecule['_id'], 'optimization',
-                                         basis, theory, functional, code=code)
+                cal = _fetch_calculation(molecule['_id'], container_name, input_parameters, input_geometry)
 
                 if cal is not None:
                     # TODO We should probably pass in the full calculation
@@ -872,7 +654,6 @@ def find_structure(identifier, basis=None, theory=None, functional=None, code='n
     # Try cactus
     molecule = _find_using_cactus(identifier)
 
-
     if not molecule:
         raise Exception('No molecules found matching identifier: \'%s\'' % identifier)
 
@@ -885,48 +666,6 @@ def compose_equation(equation, **vars):
     equation = Environment(loader=BaseLoader()).from_string(equation)
 
     return equation.render(**vars)
-
-def show_free_energies(reactions, basis=None, theory=None, functional=None):
-    free_energy_chart_data = {
-        'freeEnergy': [],
-        'reaction': []
-    }
-
-    pending_calculations = []
-    for reaction in reactions:
-        equation = reaction.equation
-        free_energy = reaction.free_energy(basis, theory, functional)
-
-        if isinstance(free_energy, list):
-            pending_calculations += free_energy
-
-        free_energy_chart_data['reaction'].append(equation)
-        free_energy_chart_data['freeEnergy'].append(free_energy)
-
-    if pending_calculations:
-        taskflow_ids = [ cal.properties['taskFlowId'] for cal in pending_calculations]
-        # Remove duplicates
-        taskflow_ids = list(set(taskflow_ids))
-
-        try:
-            from .notebook import CalculationMonitor
-            table = CalculationMonitor({
-                    'taskFlowIds': taskflow_ids,
-                    'girderToken': girder_client.token
-                })
-        except ImportError:
-            # Outside notebook just print message
-            table = 'Pending calculations .... '
-
-        return table
-
-    try:
-        from .notebook import FreeEnergy
-
-        return FreeEnergy(free_energy_chart_data)
-    except ImportError:
-        # Outside notebook print the data
-        print(free_energy_chart_data)
 
 def load(data):
     if isinstance(data, dict):
