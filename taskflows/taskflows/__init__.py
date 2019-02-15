@@ -31,7 +31,10 @@ class OpenChemistryTaskFlow(TaskFlow):
         "cluster": {
             "_id": <id of cluster to run on>
         },
-        "containerName": <The docker image name used to run the calculation>
+        "image" {
+            'repository': <the image repository, e.g. "openchemistry/psi4">
+            'tag': <the image tag, e.g. "latest">
+        }
     }
     """
 
@@ -39,7 +42,7 @@ class OpenChemistryTaskFlow(TaskFlow):
         user = getCurrentUser()
         input_ = kwargs.get('input')
         cluster = kwargs.get('cluster')
-        container_name = kwargs.get('containerName')
+        image = kwargs.get('image')
 
         if input_ is None:
             raise Exception('Unable to extract input.')
@@ -47,7 +50,7 @@ class OpenChemistryTaskFlow(TaskFlow):
         if '_id' not in cluster and 'name' not in cluster:
             raise Exception('Unable to extract cluster.')
 
-        if container_name is None:
+        if image is None:
             raise Exception('Unable to extract the docker image name.')
 
         cluster_id = parse('cluster._id').find(kwargs)
@@ -58,7 +61,7 @@ class OpenChemistryTaskFlow(TaskFlow):
             cluster = model.filter(cluster, user, passphrase=False)
 
         super(OpenChemistryTaskFlow, self).start(
-            start.s(input_, cluster, container_name),
+            start.s(input_, cluster, image),
             *args, **kwargs)
 
 def _get_cori(client):
@@ -115,7 +118,7 @@ def _fetch_best_geometry(client, molecule_id):
     return calculations[0]
 
 @cumulus.taskflow.task
-def start(task, input_, cluster, container_name):
+def start(task, input_, cluster, image):
     """
     The flow is the following:
     - Dry run the container with the -d flag to obtain a description of the input/output formats
@@ -140,7 +143,7 @@ def start(task, input_, cluster, container_name):
     description_folder = client.createFolder(root_folder['_id'],
                                     'description')
 
-    job = _create_description_job(task, cluster, description_folder, container_name)
+    job = _create_description_job(task, cluster, description_folder, image)
 
     try:
         submit_job(cluster, job, girder_token=task.taskflow.girder_token, monitor=False)
@@ -150,9 +153,9 @@ def start(task, input_, cluster, container_name):
 
     monitor_job.apply_async((cluster, job), {'girder_token': task.taskflow.girder_token,
                                              'monitor_interval': 10},
-                            link=postprocess_description.s(input_, cluster, container_name, root_folder, job, description_folder))
+                            link=postprocess_description.s(input_, cluster, image, root_folder, job, description_folder))
 
-def _create_description_job(task, cluster, description_folder, container_name):
+def _create_description_job(task, cluster, description_folder, image):
     if _nersc(cluster):
         raise NotImplementedError('Cannot run docker containers on NERSC')
     else:
@@ -162,14 +165,18 @@ def _create_description_job(task, cluster, description_folder, container_name):
 
         output_file = 'description.json'
 
+        repository = image.get('repository')
+        tag = image.get('tag')
+        image_name = ":".join([repository, tag])
+
         commands = [
-            'docker pull %s' % container_name,
-            'docker run %s -d > %s' % ( container_name, output_file )
+            'docker pull %s' % image_name,
+            'docker run %s -d > %s' % ( image_name, output_file )
         ]
 
     body = {
         # ensure there are no special characters in the submission script name
-        'name': 'desc_%s' % re.sub('[^a-zA-Z0-9]', '_', container_name),
+        'name': 'desc_%s' % re.sub('[^a-zA-Z0-9]', '_', image_name),
         'commands': commands,
         'input': [
 
@@ -192,7 +199,7 @@ def _create_description_job(task, cluster, description_folder, container_name):
     return job
 
 @cumulus.taskflow.task
-def postprocess_description(task, _, input_, cluster, container_name, root_folder, description_job, description_folder):
+def postprocess_description(task, _, input_, cluster, image, root_folder, description_job, description_folder):
     task.taskflow.logger.info('Processing description job output.')
 
     client = create_girder_client(
@@ -225,10 +232,10 @@ def postprocess_description(task, _, input_, cluster, container_name, root_folde
     # remove temporary description folder
     client.delete('folder/%s' % description_folder['_id'])
 
-    setup_input.delay(input_, cluster, container_name, root_folder, container_description)
+    setup_input.delay(input_, cluster, image, root_folder, container_description)
 
 @cumulus.taskflow.task
-def setup_input(task, input_, cluster, container_name, root_folder, container_description):
+def setup_input(task, input_, cluster, image, root_folder, container_description):
     task.taskflow.logger.info('Setting up calculation input.')
 
     client = create_girder_client(
@@ -248,10 +255,10 @@ def setup_input(task, input_, cluster, container_name, root_folder, container_de
     calculation = client.get('calculations/%s' % calculation_id)
     molecule_id = calculation['moleculeId']
 
-    input_parameters = calculation.get('properties').get('inputParameters', {})
+    input_parameters = calculation.get('input', {}).get('parameters', {})
 
     # Fetch the starting geometry
-    input_geometry = calculation.get('inputGeometry', None)
+    input_geometry = calculation.get('input', {}).get('geometry', None)
     if input_geometry is None:
         r = client.get('molecules/%s/cjson' % molecule_id, jsonResp=False)
         cjson = r.json()
@@ -290,7 +297,7 @@ def setup_input(task, input_, cluster, container_name, root_folder, container_de
         input_geometry_file = client.uploadFile(input_folder['_id'],  fp, name, size,
                                     parentType='folder')
 
-    submit_calculation.delay(input_, cluster, container_name, root_folder, container_description, input_folder, output_folder, scratch_folder)
+    submit_calculation.delay(input_, cluster, image, root_folder, container_description, input_folder, output_folder, scratch_folder)
 
 def _convert_geometry(cjson, input_format):
     if input_format.lower() == 'xyz':
@@ -300,11 +307,15 @@ def _convert_geometry(cjson, input_format):
     else:
         raise Exception('The container is requesting an unsupported geometry format %s') % input_format
 
-def _create_job_ec2(task, cluster, container_name, container_description, input_folder, output_folder, scratch_folder):
-    return _create_job_demo(task, cluster, container_name, container_description, input_folder, output_folder, scratch_folder)
+def _create_job_ec2(task, cluster, image, container_description, input_folder, output_folder, scratch_folder):
+    return _create_job_demo(task, cluster, image, container_description, input_folder, output_folder, scratch_folder)
 
-def _create_job_demo(task, cluster, container_name, container_description, input_folder, output_folder, scratch_folder):
-    task.taskflow.logger.info('Create %s job' % container_name)
+def _create_job_demo(task, cluster, image, container_description, input_folder, output_folder, scratch_folder):
+    repository = image.get('repository')
+    tag = image.get('tag')
+    image_name = ":".join([repository, tag])
+
+    task.taskflow.logger.info('Create %s job' % image_name)
 
     local_dir = 'dev_job_data'
     mount_dir = '/data'
@@ -322,12 +333,12 @@ def _create_job_demo(task, cluster, container_name, container_description, input
 
     body = {
         # ensure there are no special characters in the submission script name
-        'name': 'run_%s' % re.sub('[^a-zA-Z0-9]', '_', container_name),
+        'name': 'run_%s' % re.sub('[^a-zA-Z0-9]', '_', image_name),
         'commands': [
             'mkdir output',
             'mkdir scratch',
             'docker run -v %s:%s %s -g %s -p %s -o %s -s %s' % (
-                local_dir, mount_dir, container_name,  geometry_filename, parameters_filename, output_filename, scratch_dir
+                local_dir, mount_dir, image_name,  geometry_filename, parameters_filename, output_filename, scratch_dir
             )
         ],
         'input': [
@@ -366,17 +377,17 @@ def _nersc(cluster):
 def _demo(cluster):
     return cluster.get('name') == 'demo_cluster'
 
-def _create_job(task, cluster, container_name, container_description, input_folder, output_folder, scratch_folder):
+def _create_job(task, cluster, image, container_description, input_folder, output_folder, scratch_folder):
     if _nersc(cluster):
         raise NotImplementedError('Cannot run docker containers on NERSC')
     elif _demo(cluster):
-        return _create_job_demo(task, cluster, container_name, container_description, input_folder, output_folder, scratch_folder)
+        return _create_job_demo(task, cluster, image, container_description, input_folder, output_folder, scratch_folder)
     else:
-        return _create_job_ec2(task, cluster, container_name, container_description, input_folder, output_folder, scratch_folder)
+        return _create_job_ec2(task, cluster, image, container_description, input_folder, output_folder, scratch_folder)
 
 @cumulus.taskflow.task
-def submit_calculation(task, input_, cluster, container_name, root_folder, container_description, input_folder, output_folder, scratch_folder):
-    job = _create_job(task, cluster, container_name, container_description, input_folder, output_folder, scratch_folder)
+def submit_calculation(task, input_, cluster, image, root_folder, container_description, input_folder, output_folder, scratch_folder):
+    job = _create_job(task, cluster, image, container_description, input_folder, output_folder, scratch_folder)
 
     girder_token = task.taskflow.girder_token
     task.taskflow.set_metadata('cluster', cluster)
@@ -397,10 +408,10 @@ def submit_calculation(task, input_, cluster, container_name, root_folder, conta
 
     monitor_job.apply_async((cluster, job), {'girder_token': girder_token,
                                              'monitor_interval': 10},
-                            link=postprocess_job.s(input_, cluster, container_name, root_folder, container_description, input_folder, output_folder, scratch_folder, job))
+                            link=postprocess_job.s(input_, cluster, image, root_folder, container_description, input_folder, output_folder, scratch_folder, job))
 
 @cumulus.taskflow.task
-def postprocess_job(task, _, input_, cluster, container_name, root_folder, container_description, input_folder, output_folder, scratch_folder, job):
+def postprocess_job(task, _, input_, cluster, image, root_folder, container_description, input_folder, output_folder, scratch_folder, job):
     task.taskflow.logger.info('Processing the results of the job.')
     client = create_girder_client(
         task.taskflow.girder_api_url, task.taskflow.girder_token)

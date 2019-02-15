@@ -37,15 +37,21 @@ if girder_host:
 
     girder_file = lookup_file(girder_client, jupyterhub_url)
 
-def _fetch_calculation(molecule_id, container_name, input_parameters, input_geometry=None):
+def _fetch_calculation(molecule_id, image_name, input_parameters, input_geometry=None):
+    repository, tag = parse_image_name(image_name)
     parameters = {
         'moleculeId': molecule_id,
-        'containerName': container_name,
-        'inputParametersHash': hash_object(input_parameters)
+        'input': {
+            'parametersHash': hash_object(input_parameters)
+        },
+        'image': {
+            'repository': repository,
+            'tag': tag
+        }
     }
 
     if input_geometry:
-        parameters['inputGeometryHash'] = hash_object(input_geometry)
+        parameters['input']['geometryHash'] = hash_object(input_geometry)
 
     calculations = girder_client.get('calculations', parameters)
 
@@ -57,7 +63,7 @@ def _fetch_calculation(molecule_id, container_name, input_parameters, input_geom
 def _nersc():
     return os.environ.get('OC_SITE') == 'NERSC'
 
-def _submit_calculation(cluster_id, pending_calculation_id, container_name):
+def _submit_calculation(cluster_id, pending_calculation_id, image_name):
     if cluster_id is None and not _nersc():
         # Try to get demo cluster
         params = {
@@ -70,6 +76,8 @@ def _submit_calculation(cluster_id, pending_calculation_id, container_name):
         else:
             raise Exception('Unable to submit calculation, no cluster configured.')
 
+    repository, tag = parse_image_name(image_name)
+
     # Create the taskflow
     queue = _fetch_or_create_queue()
 
@@ -77,7 +85,10 @@ def _submit_calculation(cluster_id, pending_calculation_id, container_name):
         'taskFlowClass': 'taskflows.OpenChemistryTaskFlow',
         'meta': {
             'calculationId': pending_calculation_id,
-            'containerName': container_name
+            'image': {
+                'repository': repository,
+                'tag': tag
+            }
         }
     }
 
@@ -90,7 +101,10 @@ def _submit_calculation(cluster_id, pending_calculation_id, container_name):
                 '_id': pending_calculation_id
             }
         },
-        'containerName': container_name
+        'image': {
+            'repository': repository,
+            'tag': tag
+        }
     }
 
     if cluster_id is not None:
@@ -112,8 +126,8 @@ def _fetch_taskflow_status(taskflow_id):
 
     return r['status']
 
-def _create_pending_calculation(molecule_id, container_name, input_parameters, input_geometry=None):
-
+def _create_pending_calculation(molecule_id, image_name, input_parameters, input_geometry=None):
+    repository, tag = parse_image_name(image_name)
     body = {
         'moleculeId': molecule_id,
         'cjson': None,
@@ -121,27 +135,32 @@ def _create_pending_calculation(molecule_id, container_name, input_parameters, i
         'properties': {
             'pending': True
         },
-        'containerName': container_name,
-        'inputParameters': input_parameters,
+        'input': {
+            'parameters': input_parameters,
+        },
+        'image': {
+            'repository': repository,
+            'tag': tag
+        },
         'notebooks': [girder_file['_id']]
     }
 
     if input_geometry is not None:
-        body['inputGeometry'] = input_geometry
+        body['input']['geometry'] = input_geometry
 
     calculation = girder_client.post('calculations', json=body)
 
     return calculation
 
-def _fetch_or_submit_calculation(molecule_id, container_name, input_parameters, input_geometry=None):
+def _fetch_or_submit_calculation(molecule_id, image_name, input_parameters, input_geometry=None):
     global cluster_id
 
-    calculation = _fetch_calculation(molecule_id, container_name, input_parameters, input_geometry)
+    calculation = _fetch_calculation(molecule_id, image_name, input_parameters, input_geometry)
     taskflow_id = None
 
     if calculation is None:
-        calculation = _create_pending_calculation(molecule_id, container_name, input_parameters, input_geometry)
-        taskflow_id = _submit_calculation(cluster_id, calculation['_id'], container_name)
+        calculation = _create_pending_calculation(molecule_id, image_name, input_parameters, input_geometry)
+        taskflow_id = _submit_calculation(cluster_id, calculation['_id'], image_name)
         # Patch calculation to include taskflow id
         props = calculation['properties']
         props['taskFlowId'] = taskflow_id
@@ -210,9 +229,9 @@ class GirderMolecule(Molecule):
         super(GirderMolecule, self).__init__(CjsonProvider(cjson))
         self._id = _id
 
-    def calculate(self, container_name, input_parameters, input_geometry=None):
+    def calculate(self, image_name, input_parameters, input_geometry=None):
         molecule_id = self._id
-        calculation = _fetch_or_submit_calculation(molecule_id, container_name, input_parameters, input_geometry)
+        calculation = _fetch_or_submit_calculation(molecule_id, image_name, input_parameters, input_geometry)
         pending = parse('properties.pending').find(calculation)
         if pending:
             pending = pending[0].value
@@ -618,8 +637,8 @@ def _find_using_cactus(identifier):
     else:
         return None
 
-def find_structure(identifier, container_name=None, input_parameters=None, input_geometry=None):
-    is_calc_query = (container_name is not None and input_parameters is not None)
+def find_structure(identifier, image_name=None, input_parameters=None, input_geometry=None):
+    is_calc_query = (image_name is not None and input_parameters is not None)
 
     # InChiKey?
     if _is_inchi_key(identifier):
@@ -629,7 +648,7 @@ def find_structure(identifier, container_name=None, input_parameters=None, input
             # Are we search for a specific calculation?
             if is_calc_query:
                 # Look for optimization calculation
-                cal = _fetch_calculation(molecule['_id'], container_name, input_parameters, input_geometry)
+                cal = _fetch_calculation(molecule['_id'], image_name, input_parameters, input_geometry)
 
                 if cal is not None:
                     # TODO We should probably pass in the full calculation
@@ -723,3 +742,15 @@ def _calculation_monitor(taskflow_ids):
         table = 'Pending calculations .... '
 
     return table
+
+def parse_image_name(image_name):
+    split = image_name.split(":")
+    if len(split) > 2:
+        raise ValueError('Invalid Docker image name provided')
+    elif len(split) == 1:
+        repository = split[0]
+        tag = 'latest'
+    else:
+        repository, tag = split
+
+    return repository, tag
