@@ -145,11 +145,7 @@ def start(task, input_, cluster, image):
 
     job = _create_description_job(task, cluster, description_folder, image)
 
-    try:
-        submit_job(cluster, job, girder_token=task.taskflow.girder_token, monitor=False)
-    except:
-        import traceback
-        traceback.print_exc()
+    submit_job(cluster, job, girder_token=task.taskflow.girder_token, monitor=False)
 
     monitor_job.apply_async((cluster, job), {'girder_token': task.taskflow.girder_token,
                                              'monitor_interval': 10},
@@ -400,11 +396,7 @@ def submit_calculation(task, input_, cluster, image, root_folder, container_desc
 
     task.taskflow.logger.info('Submitting job %s to cluster.' % job['_id'])
 
-    try:
-        submit_job(cluster, job, girder_token=girder_token, monitor=False)
-    except:
-        import traceback
-        traceback.print_exc()
+    submit_job(cluster, job, girder_token=girder_token, monitor=False)
 
     monitor_job.apply_async((cluster, job), {'girder_token': girder_token,
                                              'monitor_interval': 10},

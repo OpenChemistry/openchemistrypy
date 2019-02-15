@@ -90,4 +90,4 @@ def calculate_mo(cjson, mo):
     return json.loads(conv.write_string(mol, "cjson"))['cube']
 
 def hash_object(obj):
-    return hashlib.sha1(json.dumps(obj, sort_keys=True).encode()).hexdigest()
+    return hashlib.sha512(json.dumps(obj, sort_keys=True).encode()).hexdigest()
