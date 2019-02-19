@@ -41,17 +41,12 @@ def _fetch_calculation(molecule_id, image_name, input_parameters, input_geometry
     repository, tag = parse_image_name(image_name)
     parameters = {
         'moleculeId': molecule_id,
-        'input': {
-            'parametersHash': hash_object(input_parameters)
-        },
-        'image': {
-            'repository': repository,
-            'tag': tag
-        }
+        'inputParametersHash': hash_object(input_parameters),
+        'imageName': '%s:%s' % (repository, tag)
     }
 
     if input_geometry:
-        parameters['input']['geometryHash'] = hash_object(input_geometry)
+        parameters['inputGeometryHash'] = hash_object(input_geometry)
 
     calculations = girder_client.get('calculations', parameters)
 
