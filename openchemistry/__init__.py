@@ -244,6 +244,21 @@ class GirderMolecule(Molecule):
 
         return calculation
 
+    def energy(self, image_name, input_parameters, input_geometry=None):
+        params = {'task': 'energy'}
+        params.update(input_parameters)
+        return self.calculate(image_name, params, input_geometry)
+
+    def optimize(self, image_name, input_parameters, input_geometry=None):
+        params = {'task': 'optimize'}
+        params.update(input_parameters)
+        return self.calculate(image_name, params, input_geometry)
+
+    def frequencies(self, image_name, input_parameters, input_geometry=None):
+        params = {'task': 'frequencies'}
+        params.update(input_parameters)
+        return self.calculate(image_name, params, input_geometry)
+
 class CalculationResult(Molecule):
 
     def __init__(self, _id=None, properties=None, molecule_id=None):
