@@ -143,7 +143,22 @@ def start(task, input_, cluster, image):
     description_folder = client.createFolder(root_folder['_id'],
                                     'description')
 
+    # save the pull.py script to the job directory
+    with open(os.path.join(os.path.dirname(__file__), 'utils/pull.py'), 'rb') as f:
+        # Get the size of the file
+        size = f.seek(0, 2)
+        f.seek(0)
+        name = 'pull.py'
+        input_parameters_file = client.uploadFile(description_folder['_id'],  f, name, size,
+                                    parentType='folder')
+
     job = _create_description_job(task, cluster, description_folder, image)
+
+    # Now download pull.py script to the cluster
+    task.taskflow.logger.info('Downloading description input files to cluster.')
+    download_job_input_folders(cluster, job,
+                               girder_token=task.taskflow.girder_token, submit=False)
+    task.taskflow.logger.info('Downloading complete.')
 
     submit_job(cluster, job, girder_token=task.taskflow.girder_token, monitor=False)
 
@@ -166,8 +181,9 @@ def _create_description_job(task, cluster, description_folder, image):
         image_name = ":".join([repository, tag])
 
         commands = [
-            'docker pull %s' % image_name,
-            'docker run %s -d > %s' % ( image_name, output_file )
+            'IMAGE_NAME=$(python pull.py -r %s -t %s -c docker | tail -1)' % (repository, tag),
+            'docker run $IMAGE_NAME -d > %s' % output_file,
+            'rm pull.py'
         ]
 
     body = {
@@ -175,7 +191,10 @@ def _create_description_job(task, cluster, description_folder, image):
         'name': 'desc_%s' % re.sub('[^a-zA-Z0-9]', '_', image_name),
         'commands': commands,
         'input': [
-
+            {
+              'folderId': description_folder['_id'],
+              'path': '.'
+            }
         ],
         'output': [
             {
@@ -209,16 +228,32 @@ def postprocess_description(task, _, input_, cluster, image, root_folder, descri
     description_items = list(client.listItem(description_folder['_id']))
 
     description_file = None
+    pull_file = None
     for item in description_items:
-        if item['name'].endswith('.json'):
+        if item['name'] == 'description.json':
             files = list(client.listFile(item['_id']))
             if len(files) != 1:
                 raise Exception('Expecting a single file under item, found: %s' + len(files))
             description_file = files[0]
-            break
+
+        elif item['name'] == 'pull.json':
+            files = list(client.listFile(item['_id']))
+            if len(files) != 1:
+                raise Exception('Expecting a single file under item, found: %s' + len(files))
+            pull_file = files[0]
+
+    if pull_file is None:
+        raise Exception('There was an error trying to pull the requested container image')
 
     if description_file is None:
         raise Exception('The container does not implement correctly the --description flag')
+
+    with tempfile.TemporaryFile() as tf:
+        client.downloadFile(pull_file['_id'], tf)
+        tf.seek(0)
+        container_pull = json.loads(tf.read().decode())
+
+    image = container_pull
 
     with tempfile.TemporaryFile() as tf:
         client.downloadFile(description_file['_id'], tf)
@@ -308,8 +343,8 @@ def _create_job_ec2(task, cluster, image, container_description, input_folder, o
 
 def _create_job_demo(task, cluster, image, container_description, input_folder, output_folder, scratch_folder):
     repository = image.get('repository')
-    tag = image.get('tag')
-    image_name = ":".join([repository, tag])
+    digest = image.get('digest')
+    image_name = "@".join([repository, digest])
 
     task.taskflow.logger.info('Create %s job' % image_name)
 
@@ -435,6 +470,7 @@ def postprocess_job(task, _, input_, cluster, image, root_folder, container_desc
     body = {
         'fileId': output_file['_id'],
         'format': output_format,
-        'public': True
+        'public': True,
+        'image': image # image now also has a digest field, add it to the calculation
     }
     client.put('calculations/%s' % input_['calculation']['_id'], json=body)
