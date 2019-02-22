@@ -11,7 +11,7 @@ except ImportError:
 reg_base_url = 'https://registry-1.docker.io/v2'
 reg_auth_base_url = 'https://auth.docker.io'
 
-def ensure_singurity_dir():
+def ensure_singularity_dir():
     home = os.path.expanduser("~")
     singularity_dir = os.path.join(home, '.oc', 'singularity')
 
@@ -28,7 +28,7 @@ def ensure_singurity_dir():
 
 def singularity(repo, digest):
     image_name = '%s@%s' % (repo, digest)
-    singularity_dir = ensure_singurity_dir()
+    singularity_dir = ensure_singularity_dir()
     digest = digest.split(':')[1]
     container_path = os.path.join(singularity_dir, '%s.sif' % digest)
 
@@ -46,7 +46,7 @@ def docker(repo, digest):
 
 def write_descriptor(repo, tag, digest):
     des = {
-        'repositoryName': repo,
+        'repository': repo,
         'tag': tag,
         'digest': digest
     }
