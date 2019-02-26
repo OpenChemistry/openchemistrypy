@@ -44,11 +44,12 @@ def docker(repo, digest):
 
     return image_name
 
-def write_descriptor(repo, tag, digest):
+def write_descriptor(repo, tag, digest, image_uri):
     des = {
         'repository': repo,
         'tag': tag,
-        'digest': digest
+        'digest': digest,
+        'imageUri': image_uri
     }
 
     with open('pull.json', 'w') as fp:
@@ -82,12 +83,14 @@ def main():
     token = authenticate(repo)
     digest = fetch_digest(repo, tag, token)
 
-    write_descriptor(repo, tag, digest)
-
     if container == 'singularity':
-        print(singularity(repo, digest))
+        image_uri = singularity(repo, digest)
     else:
-        print(docker(repo, digest))
+        image_uri = docker(repo, digest)
+
+    write_descriptor(repo, tag, digest, image_uri)
+
+    print(image_uri)
 
 if __name__ == "__main__":
     main()

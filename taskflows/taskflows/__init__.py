@@ -167,24 +167,30 @@ def start(task, input_, cluster, image):
                             link=postprocess_description.s(input_, cluster, image, root_folder, job, description_folder))
 
 def _create_description_job(task, cluster, description_folder, image):
+    container = 'docker'
+    setup_commands = []
+
     if _nersc(cluster):
+        container = 'singularity'
         raise NotImplementedError('Cannot run docker containers on NERSC')
-    else:
-        params = {
-            'taskFlowId': task.taskflow.id
-        }
+    elif _demo(cluster):
+        setup_commands = ['source scl_source enable python27']
 
-        output_file = 'description.json'
+    params = {
+        'taskFlowId': task.taskflow.id
+    }
 
-        repository = image.get('repository')
-        tag = image.get('tag')
-        image_name = ":".join([repository, tag])
+    output_file = 'description.json'
 
-        commands = [
-            'IMAGE_NAME=$(python pull.py -r %s -t %s -c docker | tail -1)' % (repository, tag),
-            'docker run $IMAGE_NAME -d > %s' % output_file,
-            'rm pull.py'
-        ]
+    repository = image.get('repository')
+    tag = image.get('tag')
+    image_name = ":".join([repository, tag])
+
+    commands = setup_commands + [
+        'IMAGE_NAME=$(python pull.py -r %s -t %s -c %s | tail -1)' % (repository, tag, container),
+        '%s run $IMAGE_NAME -d > %s' % (container, output_file),
+        'rm pull.py'
+    ]
 
     body = {
         # ensure there are no special characters in the submission script name
@@ -342,6 +348,7 @@ def _create_job_ec2(task, cluster, image, container_description, input_folder, o
     return _create_job_demo(task, cluster, image, container_description, input_folder, output_folder, scratch_folder)
 
 def _create_job_demo(task, cluster, image, container_description, input_folder, output_folder, scratch_folder):
+    image_uri = image.get('imageUri')
     repository = image.get('repository')
     digest = image.get('digest')
     image_name = "@".join([repository, digest])
@@ -369,7 +376,7 @@ def _create_job_demo(task, cluster, image, container_description, input_folder, 
             'mkdir output',
             'mkdir scratch',
             'docker run -v %s:%s %s -g %s -p %s -o %s -s %s' % (
-                local_dir, mount_dir, image_name,  geometry_filename, parameters_filename, output_filename, scratch_dir
+                local_dir, mount_dir, image_uri,  geometry_filename, parameters_filename, output_filename, scratch_dir
             )
         ],
         'input': [
