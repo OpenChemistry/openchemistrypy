@@ -175,7 +175,7 @@ def start(task, input_, cluster, image, run_parameters):
                             link=postprocess_description.s(input_, cluster, image, run_parameters, root_folder, job, description_folder))
 
 def _create_description_job(task, cluster, description_folder, image, run_parameters):
-    container = 'docker'
+    container = run_parameters.get('container', 'docker')
     setup_commands = []
 
     if _nersc(cluster):
@@ -356,6 +356,7 @@ def _create_job_ec2(task, cluster, image, run_parameters, container_description,
     return _create_job_demo(task, cluster, image, run_parameters, container_description, input_folder, output_folder, scratch_folder)
 
 def _create_job_demo(task, cluster, image, run_parameters, container_description, input_folder, output_folder, scratch_folder):
+    container = run_parameters.get('container', 'docker')
     image_uri = image.get('imageUri')
     repository = image.get('repository')
     digest = image.get('digest')
@@ -377,14 +378,35 @@ def _create_job_demo(task, cluster, image, run_parameters, container_description
     parameters_filename = os.path.join(input_dir, 'input_parameters.json')
     output_filename = os.path.join(output_dir, 'output.%s' % output_format)
 
+    output = [
+        {
+            'folderId': output_folder['_id'],
+            'path': './output'
+        }
+    ]
+
+    keep_scratch = run_parameters.get('keepScratch', False)
+    if keep_scratch:
+        output.append({
+            'folderId': scratch_folder['_id'],
+            'path': './scratch'
+        })
+
+    if container == 'docker':
+        mount_option = '-v %s:%s' % (local_dir, mount_dir)
+    else:
+        mount_option = ''
+
     body = {
         # ensure there are no special characters in the submission script name
         'name': 'run_%s' % re.sub('[^a-zA-Z0-9]', '_', image_name),
         'commands': [
             'mkdir output',
             'mkdir scratch',
-            'docker run -v %s:%s %s -g %s -p %s -o %s -s %s' % (
-                local_dir, mount_dir, image_uri,  geometry_filename, parameters_filename, output_filename, scratch_dir
+            '%s run %s %s -g %s -p %s -o %s -s %s' % (
+                container, mount_option, image_uri,
+                geometry_filename, parameters_filename,
+                output_filename, scratch_dir
             )
         ],
         'input': [
@@ -393,16 +415,7 @@ def _create_job_demo(task, cluster, image, run_parameters, container_description
               'path': './input'
             }
         ],
-        'output': [
-            {
-              'folderId': output_folder['_id'],
-              'path': './output'
-            },
-            {
-              'folderId': scratch_folder['_id'],
-              'path': './scratch'
-            }
-        ],
+        'output': output,
         'uploadOutput': False,
         'params': {
             'taskFlowId': task.taskflow.id
