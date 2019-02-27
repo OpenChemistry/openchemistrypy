@@ -58,7 +58,7 @@ def _fetch_calculation(molecule_id, image_name, input_parameters, input_geometry
 def _nersc():
     return os.environ.get('OC_SITE') == 'NERSC'
 
-def _submit_calculation(cluster_id, pending_calculation_id, image_name):
+def _submit_calculation(cluster_id, pending_calculation_id, image_name, run_parameters):
     if cluster_id is None and not _nersc():
         # Try to get demo cluster
         params = {
@@ -70,6 +70,9 @@ def _submit_calculation(cluster_id, pending_calculation_id, image_name):
             cluster_id = clusters[0]['_id']
         else:
             raise Exception('Unable to submit calculation, no cluster configured.')
+    
+    if run_parameters is None:
+        run_parameters = {}
 
     repository, tag = parse_image_name(image_name)
 
@@ -99,7 +102,8 @@ def _submit_calculation(cluster_id, pending_calculation_id, image_name):
         'image': {
             'repository': repository,
             'tag': tag
-        }
+        },
+        'runParameters': run_parameters
     }
 
     if cluster_id is not None:
@@ -147,7 +151,7 @@ def _create_pending_calculation(molecule_id, image_name, input_parameters, input
 
     return calculation
 
-def _fetch_or_submit_calculation(molecule_id, image_name, input_parameters, input_geometry=None):
+def _fetch_or_submit_calculation(molecule_id, image_name, input_parameters, input_geometry=None, run_parameters=None):
     global cluster_id
 
     calculation = _fetch_calculation(molecule_id, image_name, input_parameters, input_geometry)
@@ -155,7 +159,7 @@ def _fetch_or_submit_calculation(molecule_id, image_name, input_parameters, inpu
 
     if calculation is None:
         calculation = _create_pending_calculation(molecule_id, image_name, input_parameters, input_geometry)
-        taskflow_id = _submit_calculation(cluster_id, calculation['_id'], image_name)
+        taskflow_id = _submit_calculation(cluster_id, calculation['_id'], image_name, run_parameters)
         # Patch calculation to include taskflow id
         props = calculation['properties']
         props['taskFlowId'] = taskflow_id
@@ -220,13 +224,15 @@ class GirderMolecule(Molecule):
     '''
     Derived version that allows calculations to be initiated on using Girder
     '''
-    def __init__(self, _id, cjson):
+    def __init__(self, _id, cjson=None):
+        if cjson is None:
+            cjson = girder_client.get('molecules/%s/cjson' % _id)
         super(GirderMolecule, self).__init__(CjsonProvider(cjson))
         self._id = _id
 
-    def calculate(self, image_name, input_parameters, input_geometry=None):
+    def calculate(self, image_name, input_parameters, input_geometry=None, run_parameters=None):
         molecule_id = self._id
-        calculation = _fetch_or_submit_calculation(molecule_id, image_name, input_parameters, input_geometry)
+        calculation = _fetch_or_submit_calculation(molecule_id, image_name, input_parameters, input_geometry, run_parameters)
         pending = parse('properties.pending').find(calculation)
         if pending:
             pending = pending[0].value
@@ -244,20 +250,20 @@ class GirderMolecule(Molecule):
 
         return calculation
 
-    def energy(self, image_name, input_parameters, input_geometry=None):
+    def energy(self, image_name, input_parameters, input_geometry=None, run_parameters=None):
         params = {'task': 'energy'}
         params.update(input_parameters)
-        return self.calculate(image_name, params, input_geometry)
+        return self.calculate(image_name, params, input_geometry, run_parameters)
 
-    def optimize(self, image_name, input_parameters, input_geometry=None):
+    def optimize(self, image_name, input_parameters, input_geometry=None, run_parameters=None):
         params = {'task': 'optimize'}
         params.update(input_parameters)
-        return self.calculate(image_name, params, input_geometry)
+        return self.calculate(image_name, params, input_geometry, run_parameters)
 
-    def frequencies(self, image_name, input_parameters, input_geometry=None):
+    def frequencies(self, image_name, input_parameters, input_geometry=None, run_parameters=None):
         params = {'task': 'frequencies'}
         params.update(input_parameters)
-        return self.calculate(image_name, params, input_geometry)
+        return self.calculate(image_name, params, input_geometry, run_parameters)
 
 class CalculationResult(Molecule):
 
