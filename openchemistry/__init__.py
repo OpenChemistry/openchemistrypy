@@ -833,6 +833,31 @@ def _find_using_cactus(identifier):
     else:
         return None
 
+def find_spectra(identifier, stype='IR', source='NIST'):
+    """Find spectra in source database
+
+    Parameters
+    ----------
+    identifier : str
+        Inchi string.
+    stype : str
+        Type of spectrum to query.
+    source : str
+        Database to query. Supported are: 'NIST'
+    """
+    source = source.lower()
+
+    params = {
+            'molecularFormula' : identifier,
+            'spectrum_type' : stype,
+            'source' : source
+    }
+
+    spectra = girder_client.get('experiments', parameters=params)
+
+    return spectra
+
+
 def find_structure(identifier, basis=None, theory=None, functional=None, code='nwchem'):
     is_calc_query = (basis is not None or theory is not None
                      or functional is not None)
