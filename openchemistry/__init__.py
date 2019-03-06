@@ -70,7 +70,7 @@ def _submit_calculation(cluster_id, pending_calculation_id, image_name, run_para
             cluster_id = clusters[0]['_id']
         else:
             raise Exception('Unable to submit calculation, no cluster configured.')
-    
+
     if run_parameters is None:
         run_parameters = {}
 
@@ -787,7 +787,7 @@ def find_spectra(identifier, stype='IR', source='NIST'):
     source = source.lower()
 
     params = {
-            'molecularFormula' : identifier,
+            'inchi' : identifier,
             'spectrum_type' : stype,
             'source' : source
     }
