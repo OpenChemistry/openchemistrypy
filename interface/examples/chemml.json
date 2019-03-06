@@ -1,0 +1,13 @@
+{
+  "name": "ChemML",
+  "version": "0.5.0",
+  "description": "ChemML is a machine learning and informatics program suite for the chemical and materials sciences.",
+  "input": {
+    "geometry": {
+      "format": "xyz"
+    }
+  },
+  "output": {
+    "format": "cjson"
+  }
+}

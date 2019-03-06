@@ -1,0 +1,92 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://openchemistry.org/code.schema.json",
+  "title": "Code description schema",
+  "description": "A description of the codes input and output requirements.",
+  "type": "object",
+
+  "definitions": {
+    "geometryFormat": {
+      "type": "string",
+      "description": "Geometry format",
+      "enum": ["xyz", "cjson"]
+    },
+    "genericFormat": {
+      "type": "string",
+      "description": "Generic format",
+      "enum": ["csv", "json", "xml"]
+    },
+    "parameterFormat": {
+      "type": "object",
+      "description": "A description of an individual parameter.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "The parameter's type",
+          "enum": ["string", "number", "array", "boolean", "object"]
+        },
+        "description": {
+          "type": "string",
+          "description": "The parameter's description"
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Whether a value for the parameter is required"
+        },
+        "default": {
+          "type": ["string", "number", "array", "boolean", "object"],
+          "description": "The default value of the parameter, if no specific value is provided"
+        }
+      },
+      "required": ["type", "description"]
+    }
+  },
+
+  "properties": {
+    "name": {
+      "description": "The name of the code",
+      "type": "string"
+    },
+    "version": {
+      "description": "The version of the code",
+      "type": "string"
+    },
+    "description": {
+      "description": "A description of the code",
+      "type": "string"
+    },
+    "input": {
+      "description": "A description of the input this code expects/can handle.",
+      "type": "object",
+      "properties": {
+        "format": { "$ref": "#/definitions/geometryFormat" },
+        "parameters": {
+          "type": "object",
+          "description": "A description of the parameters that a container is able to understand.",
+          "patternProperties": {
+            "^.*$": { "$ref": "#/definitions/parameterFormat"}
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": ["format"]
+    },
+    "output": {
+      "description": "A description of the output format this code products.",
+      "type": "object",
+      "properties": {
+        "format": {
+          "oneOf": [
+            {
+            "$ref": "#/definitions/geometryFormat"
+            }, {
+              "$ref": "#/definitions/genericFormat"
+            }
+          ]
+        }
+      },
+      "required": ["format"]
+    }
+  },
+  "required": [ "name", "input", "output" ]
+}

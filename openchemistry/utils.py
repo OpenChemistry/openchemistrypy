@@ -2,6 +2,7 @@ import os
 import requests
 import re
 import json
+import hashlib
 
 import avogadro
 
@@ -87,3 +88,6 @@ def calculate_mo(cjson, mo):
     gaussian.calculate_molecular_orbital(cube, mo)
 
     return json.loads(conv.write_string(mol, "cjson"))['cube']
+
+def hash_object(obj):
+    return hashlib.sha512(json.dumps(obj, sort_keys=True).encode()).hexdigest()
