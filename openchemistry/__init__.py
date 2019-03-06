@@ -35,7 +35,9 @@ if girder_host:
     elif girder_token is not None:
         girder_client.token = girder_token
 
-    girder_file = lookup_file(girder_client, jupyterhub_url)
+    girder_file = None
+    if jupyterhub_url is not None:
+        girder_file = lookup_file(girder_client, jupyterhub_url)
 
 def _fetch_calculation(molecule_id, image_name, input_parameters, input_geometry=None):
     repository, tag = parse_image_name(image_name)
@@ -127,6 +129,11 @@ def _fetch_taskflow_status(taskflow_id):
 
 def _create_pending_calculation(molecule_id, image_name, input_parameters, input_geometry=None):
     repository, tag = parse_image_name(image_name)
+
+    notebooks = []
+    if girder_file is not None:
+        notebooks.append(girder_file['_id'])
+
     body = {
         'moleculeId': molecule_id,
         'cjson': None,
@@ -141,7 +148,7 @@ def _create_pending_calculation(molecule_id, image_name, input_parameters, input
             'repository': repository,
             'tag': tag
         },
-        'notebooks': [girder_file['_id']]
+        'notebooks': notebooks
     }
 
     if input_geometry is not None:
@@ -166,8 +173,12 @@ def _fetch_or_submit_calculation(molecule_id, image_name, input_parameters, inpu
         calculation = girder_client.put('calculations/%s/properties' % calculation['_id'], json=props)
     else:
         # If we already have a calculation tag it with this notebooks id
+        notebooks = calculation.setdefault('notebooks', [])
+        if girder_file is not None:
+            notebooks.append(girder_file['_id'])
+
         body = {
-            'notebooks': [girder_file['_id']]
+            'notebooks': notebooks
         }
         girder_client.patch('calculations/%s/notebooks' % calculation['_id'],
                             json=body)
