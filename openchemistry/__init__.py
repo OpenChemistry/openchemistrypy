@@ -22,6 +22,9 @@ girder_scheme = os.environ.get('GIRDER_SCHEME', 'http')
 girder_api_root = os.environ.get('GIRDER_API_ROOT', '/api/v1')
 girder_api_key = os.environ.get('GIRDER_API_KEY')
 girder_token = os.environ.get('GIRDER_TOKEN')
+girder_api_url = '%s://%s%s/%s' % (
+    girder_scheme, girder_host, ':%s' % girder_port if girder_port else '',
+    girder_api_root )
 app_base_url = os.environ.get('APP_BASE_URL')
 cluster_id = os.environ.get('CLUSTER_ID')
 jupyterhub_url = os.environ.get('OC_JUPYTERHUB_URL')
@@ -72,7 +75,7 @@ def _submit_calculation(cluster_id, pending_calculation_id, image_name, run_para
             cluster_id = clusters[0]['_id']
         else:
             raise Exception('Unable to submit calculation, no cluster configured.')
-    
+
     if run_parameters is None:
         run_parameters = {}
 
@@ -611,7 +614,8 @@ class PendingCalculationResultWrapper(AttributeInterceptor):
 
             table = CalculationMonitor({
                 'taskFlowIds': [taskflow_id],
-                'girderToken': girder_client.token
+                'girderToken': girder_client.token,
+                'girderApiUrl': girder_api_url
             })
         except ImportError:
             # Outside notebook just print message
@@ -762,7 +766,8 @@ def _calculation_monitor(taskflow_ids):
         from .notebook import CalculationMonitor
         table = CalculationMonitor({
             'taskFlowIds': taskflow_ids,
-            'girderToken': girder_client.token
+            'girderToken': girder_client.token,
+            'girderApiUrl': girder_api_url
         })
     except ImportError:
         # Outside notebook just print message
