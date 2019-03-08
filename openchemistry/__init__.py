@@ -786,3 +786,28 @@ def parse_image_name(image_name):
         repository, tag = split
 
     return repository, tag
+
+
+def find_spectra(identifier, stype='IR', source='NIST'):
+    """Find spectra in source database
+
+    Parameters
+    ----------
+    identifier : str
+        Inchi string.
+    stype : str
+        Type of spectrum to query.
+    source : str
+        Database to query. Supported are: 'NIST'
+    """
+    source = source.lower()
+
+    params = {
+            'inchi' : identifier,
+            'spectrum_type' : stype,
+            'source' : source
+    }
+
+    spectra = girder_client.get('experiments', parameters=params)
+
+    return spectra
