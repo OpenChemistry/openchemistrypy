@@ -108,23 +108,6 @@ def _get_oc_folder(client):
 
     return oc_folder
 
-def _fetch_best_geometry(client, molecule_id):
-    # Fetch our best geometry
-    params = {
-        'moleculeId': molecule_id,
-        'sortByTheory': True,
-        'limit': 1,
-        'calculationType': 'optimization',
-        'pending': False
-    }
-
-    calculations = client.get('calculations', parameters=params)
-
-    if len(calculations) < 1:
-        return None
-
-    return calculations[0]
-
 @cumulus.taskflow.task
 def start(task, input_, cluster, image, run_parameters):
     """
