@@ -155,25 +155,56 @@ def start(task, input_, cluster, image, run_parameters):
                                              'monitor_interval': 10},
                             link=postprocess_description.s(input_, cluster, image, run_parameters, root_folder, job, description_folder))
 
-def _create_description_job(task, cluster, description_folder, image, run_parameters):
-    container = run_parameters.get('container', 'docker')
+def _get_job_parameters(cluster, image, run_parameters):
+    container = run_parameters.get('container', 'docker') # docker | singularity
+    repository = image.get('repository')
+    tag = image.get('tag')
+    digest = image.get('digest')
+    image_uri = image.get('imageUri')
+    host_dir = '$(pwd)' # the host directory being mounted into the container
+    guest_dir = '/data' # the directory inside the container pointing to host_dir
+    job_dir = '' # relative path from guest_dir to the job directory
     setup_commands = []
 
-    if _nersc(cluster):
-        container = 'singularity'
-        raise NotImplementedError('Cannot run docker containers on NERSC')
-    elif _demo(cluster):
-        setup_commands = ['source scl_source enable python27']
+    # Override default parameters depending on the cluster we are running on
 
-    params = {
+    if _nersc(cluster):
+        # NERSC specific options
+        container = 'singularity' # no root access, only singularity is supported
+        raise NotImplementedError('Cannot run on NERSC yet')
+    elif _demo(cluster):
+        # DEV/DEMO environment options
+        host_dir = 'dev_job_data'
+        job_dir = '{{job._id}}'
+        setup_commands = ['source scl_source enable python27']
+    else:
+        # baremetal options
+        pass
+
+    return {
+        'container': container,
+        'imageUri': image_uri,
+        'repository': repository,
+        'tag': tag,
+        'digest': digest,
+        'hostDir': host_dir,
+        'guestDir': guest_dir,
+        'jobDir': job_dir,
+        'setupCommands': setup_commands
+    }
+
+def _create_description_job(task, cluster, description_folder, image, run_parameters):
+    params = _get_job_parameters(cluster, image, run_parameters)
+    container = params['container']
+    setup_commands = params['setupCommands']
+    repository = params['repository']
+    tag = params['tag']
+
+    job_params = {
         'taskFlowId': task.taskflow.id
     }
 
     output_file = 'description.json'
-
-    repository = image.get('repository')
-    tag = image.get('tag')
-    image_name = ":".join([repository, tag])
 
     commands = setup_commands + [
         'IMAGE_NAME=$(python pull.py -r %s -t %s -c %s | tail -1)' % (repository, tag, container),
@@ -183,7 +214,7 @@ def _create_description_job(task, cluster, description_folder, image, run_parame
 
     body = {
         # ensure there are no special characters in the submission script name
-        'name': 'desc_%s' % re.sub('[^a-zA-Z0-9]', '_', image_name),
+        'name': 'desc_%s' % re.sub('[^a-zA-Z0-9]', '_', repository),
         'commands': commands,
         'input': [
             {
@@ -198,7 +229,7 @@ def _create_description_job(task, cluster, description_folder, image, run_parame
             }
         ],
         'uploadOutput': False,
-        'params': params
+        'params': job_params
     }
 
     client = create_girder_client(
@@ -333,27 +364,24 @@ def _convert_geometry(cjson, input_format):
     else:
         raise Exception('The container is requesting an unsupported geometry format %s') % input_format
 
-def _create_job_ec2(task, cluster, image, run_parameters, container_description, input_folder, output_folder, scratch_folder):
-    return _create_job_demo(task, cluster, image, run_parameters, container_description, input_folder, output_folder, scratch_folder)
+def _create_job(task, cluster, image, run_parameters, container_description, input_folder, output_folder, scratch_folder):
+    params = _get_job_parameters(cluster, image, run_parameters)
+    container = params['container']
+    image_uri = params['imageUri']
+    repository = params['repository']
+    digest = params['digest']
+    host_dir = params['hostDir']
+    guest_dir = params['guestDir']
+    job_dir = params['jobDir']
 
-def _create_job_demo(task, cluster, image, run_parameters, container_description, input_folder, output_folder, scratch_folder):
-    container = run_parameters.get('container', 'docker')
-    image_uri = image.get('imageUri')
-    repository = image.get('repository')
-    digest = image.get('digest')
-    image_name = "@".join([repository, digest])
-
-    task.taskflow.logger.info('Create %s job' % image_name)
-
-    local_dir = 'dev_job_data'
-    mount_dir = '/data'
+    task.taskflow.logger.info('Create %s job' % repository)
 
     input_format = container_description['input']['format']
     output_format = container_description['output']['format']
 
-    input_dir = os.path.join(mount_dir, '{{job._id}}', 'input')
-    output_dir = os.path.join(mount_dir, '{{job._id}}', 'output')
-    scratch_dir = os.path.join(mount_dir, '{{job._id}}', 'scratch')
+    input_dir = os.path.join(guest_dir, job_dir, 'input')
+    output_dir = os.path.join(guest_dir, job_dir, 'output')
+    scratch_dir = os.path.join(guest_dir, job_dir, 'scratch')
 
     geometry_filename = os.path.join(input_dir, 'geometry.%s' % input_format)
     parameters_filename = os.path.join(input_dir, 'input_parameters.json')
@@ -374,13 +402,13 @@ def _create_job_demo(task, cluster, image, run_parameters, container_description
         })
 
     if container == 'docker':
-        mount_option = '-v %s:%s' % (local_dir, mount_dir)
+        mount_option = '-v %s:%s' % (host_dir, guest_dir)
     else:
         mount_option = ''
 
     body = {
         # ensure there are no special characters in the submission script name
-        'name': 'run_%s' % re.sub('[^a-zA-Z0-9]', '_', image_name),
+        'name': 'run_%s' % re.sub('[^a-zA-Z0-9]', '_', repository),
         'commands': [
             'mkdir output',
             'mkdir scratch',
@@ -416,14 +444,6 @@ def _nersc(cluster):
 
 def _demo(cluster):
     return cluster.get('name') == 'demo_cluster'
-
-def _create_job(task, cluster, image, run_parameters, container_description, input_folder, output_folder, scratch_folder):
-    if _nersc(cluster):
-        raise NotImplementedError('Cannot run docker containers on NERSC')
-    elif _demo(cluster):
-        return _create_job_demo(task, cluster, image, run_parameters, container_description, input_folder, output_folder, scratch_folder)
-    else:
-        return _create_job_ec2(task, cluster, image, run_parameters, container_description, input_folder, output_folder, scratch_folder)
 
 @cumulus.taskflow.task
 def submit_calculation(task, input_, cluster, image, run_parameters, root_folder, container_description, input_folder, output_folder, scratch_folder):
