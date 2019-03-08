@@ -1,4 +1,3 @@
-from bson.objectid import ObjectId
 import cumulus
 from cumulus.taskflow import TaskFlow
 from cumulus.taskflow.cluster import create_girder_client
@@ -14,7 +13,6 @@ from jsonpath_rw import parse
 import os
 import datetime
 import json
-from io import BytesIO
 import tempfile
 import re
 
