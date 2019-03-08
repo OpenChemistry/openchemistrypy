@@ -22,6 +22,9 @@ girder_scheme = os.environ.get('GIRDER_SCHEME', 'http')
 girder_api_root = os.environ.get('GIRDER_API_ROOT', '/api/v1')
 girder_api_key = os.environ.get('GIRDER_API_KEY')
 girder_token = os.environ.get('GIRDER_TOKEN')
+girder_api_url = '%s://%s%s/%s' % (
+    girder_scheme, girder_host, ':%s' % girder_port if girder_port else '',
+    girder_api_root )
 app_base_url = os.environ.get('APP_BASE_URL')
 cluster_id = os.environ.get('CLUSTER_ID')
 jupyterhub_url = os.environ.get('OC_JUPYTERHUB_URL')
@@ -35,7 +38,9 @@ if girder_host:
     elif girder_token is not None:
         girder_client.token = girder_token
 
-    girder_file = lookup_file(girder_client, jupyterhub_url)
+    girder_file = None
+    if jupyterhub_url is not None:
+        girder_file = lookup_file(girder_client, jupyterhub_url)
 
 def _fetch_calculation(molecule_id, image_name, input_parameters, input_geometry=None):
     repository, tag = parse_image_name(image_name)
@@ -127,6 +132,11 @@ def _fetch_taskflow_status(taskflow_id):
 
 def _create_pending_calculation(molecule_id, image_name, input_parameters, input_geometry=None):
     repository, tag = parse_image_name(image_name)
+
+    notebooks = []
+    if girder_file is not None:
+        notebooks.append(girder_file['_id'])
+
     body = {
         'moleculeId': molecule_id,
         'cjson': None,
@@ -141,7 +151,7 @@ def _create_pending_calculation(molecule_id, image_name, input_parameters, input
             'repository': repository,
             'tag': tag
         },
-        'notebooks': [girder_file['_id']]
+        'notebooks': notebooks
     }
 
     if input_geometry is not None:
@@ -166,8 +176,12 @@ def _fetch_or_submit_calculation(molecule_id, image_name, input_parameters, inpu
         calculation = girder_client.put('calculations/%s/properties' % calculation['_id'], json=props)
     else:
         # If we already have a calculation tag it with this notebooks id
+        notebooks = calculation.setdefault('notebooks', [])
+        if girder_file is not None:
+            notebooks.append(girder_file['_id'])
+
         body = {
-            'notebooks': [girder_file['_id']]
+            'notebooks': notebooks
         }
         girder_client.patch('calculations/%s/notebooks' % calculation['_id'],
                             json=body)
@@ -600,7 +614,8 @@ class PendingCalculationResultWrapper(AttributeInterceptor):
 
             table = CalculationMonitor({
                 'taskFlowIds': [taskflow_id],
-                'girderToken': girder_client.token
+                'girderToken': girder_client.token,
+                'girderApiUrl': girder_api_url
             })
         except ImportError:
             # Outside notebook just print message
@@ -751,7 +766,8 @@ def _calculation_monitor(taskflow_ids):
         from .notebook import CalculationMonitor
         table = CalculationMonitor({
             'taskFlowIds': taskflow_ids,
-            'girderToken': girder_client.token
+            'girderToken': girder_client.token,
+            'girderApiUrl': girder_api_url
         })
     except ImportError:
         # Outside notebook just print message
