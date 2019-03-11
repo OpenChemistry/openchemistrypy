@@ -161,6 +161,9 @@ def _create_pending_calculation(molecule_id, image_name, input_parameters, input
 
     return calculation
 
+def _delete_calculation(calculation_id):
+    girder_client.delete('calculations/%s' % calculation_id)
+
 def _fetch_or_submit_calculation(molecule_id, image_name, input_parameters, input_geometry=None, run_parameters=None):
     global cluster_id
 
@@ -292,6 +295,9 @@ class CalculationResult(Molecule):
         import warnings
         warnings.warn("Use the 'vibrations' property to display normal modes")
         return self.vibrations
+
+    def delete(self):
+        return _delete_calculation(self._id)
 
 class DataProvider(ABC):
     @property
