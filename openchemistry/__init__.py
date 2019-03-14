@@ -668,8 +668,46 @@ def _find_using_cactus(identifier):
     else:
         return None
 
-def find_structure(identifier, image_name=None, input_parameters=None, input_geometry=None):
+def find_structure_by_inchi_or_smiles(inchi=None, smiles=None):
+    params = {}
+    if inchi:
+        params['inchi'] = inchi
+    elif smiles:
+        params['smiles'] = smiles
+
+    if not params:
+       raise Exception('Either inchi or smiles must be set')
+
+    molecules = girder_client.get('molecules', parameters=params)
+
+    if not molecules:
+        raise Exception('No molecules found with parameters:', params)
+
+     # This will return a list of molecules. Only keep the first one.
+    return molecules[0]
+
+def find_structure(identifier=None, image_name=None, input_parameters=None, input_geometry=None, inchi=None, smiles=None):
     is_calc_query = (image_name is not None and input_parameters is not None)
+
+    if inchi or smiles:
+        molecule = find_structure_by_inchi_or_smiles(inchi, smiles)
+
+        # Are we searching for a specific calculation?
+        if is_calc_query:
+            # Look for optimization calculation
+            cal = _fetch_calculation(molecule['_id'], image_name, input_parameters, input_geometry)
+
+            if cal is not None:
+                # TODO We should probably pass in the full calculation
+                # so we don't have to fetch it again.
+                return CalculationResult(cal['_id'])
+            else:
+                return None
+        else:
+            return GirderMolecule(molecule['_id'], molecule['cjson'])
+
+    if not identifier:
+        raise Exception('identifier, inchi, or smiles must be set')
 
     # InChiKey?
     if _is_inchi_key(identifier):
