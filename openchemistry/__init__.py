@@ -673,26 +673,20 @@ def import_structure(inchikey=None, inchi=None, smiles=None):
     params = {}
     if inchikey:
         params['inchikey'] = inchikey
-    if inchi:
+    elif inchi:
         params['inchi'] = inchi
-    if smiles:
+    elif smiles:
         params['smiles'] = smiles
-
-    if not params:
-        raise Exception('At least one of these must be set: '
+    else:
+        raise Exception('One of the arguments must be set: '
                         'inchikey, inchi, or smiles')
 
-    molecules = girder_client.get('molecules', parameters=params)
+    molecule = girder_client.post('molecules', json=params)
 
-    if not molecules:
-        raise Exception('No molecules found with parameters:', params)
+    if not molecule:
+        raise Exception('Molecule could not be imported with params', params)
 
-    # This will return a list of molecules. Only keep the first one.
-    molecule = molecules[0]
-
-    # GET /molecules currently doesn't return cjson.
-    # The GirderMolecule __init__ will find it via another rest call.
-    return GirderMolecule(molecule['_id'])
+    return GirderMolecule(molecule['_id'], molecule['cjson'])
 
 def find_structure(identifier, image_name=None, input_parameters=None, input_geometry=None):
     is_calc_query = (image_name is not None and input_parameters is not None)
