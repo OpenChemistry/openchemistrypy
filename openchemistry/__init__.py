@@ -16,6 +16,8 @@ from .io.psi4 import Psi4Reader
 from .io.nwchemJson import NWChemJsonReader
 from .io.cjson import CjsonReader
 
+from .nersc import _nersc, _fetch_cori_cluster
+
 girder_host = os.environ.get('GIRDER_HOST')
 girder_port = os.environ.get('GIRDER_PORT')
 girder_scheme = os.environ.get('GIRDER_SCHEME', 'http')
@@ -60,21 +62,22 @@ def _fetch_calculation(molecule_id, image_name, input_parameters, input_geometry
 
     return calculations[0]
 
-def _nersc():
-    return os.environ.get('OC_SITE') == 'NERSC'
-
 def _submit_calculation(cluster_id, pending_calculation_id, image_name, run_parameters):
-    if cluster_id is None and not _nersc():
-        # Try to get demo cluster
-        params = {
-            'type': 'trad'
-        }
-        clusters = girder_client.get('clusters', params)
-
-        if len(clusters) > 0:
-            cluster_id = clusters[0]['_id']
+    if cluster_id is None:
+        if  _nersc():
+            cori_cluster = _fetch_cori_cluster(girder_client)
+            cluster_id = cori_cluster['_id']
         else:
-            raise Exception('Unable to submit calculation, no cluster configured.')
+            # Try to get demo cluster
+            params = {
+                'type': 'trad'
+            }
+            clusters = girder_client.get('clusters', params)
+
+            if len(clusters) > 0:
+                cluster_id = clusters[0]['_id']
+            else:
+                raise Exception('Unable to submit calculation, no cluster configured.')
 
     if run_parameters is None:
         run_parameters = {}
