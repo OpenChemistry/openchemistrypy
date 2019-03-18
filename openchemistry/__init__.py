@@ -674,6 +674,23 @@ def _find_using_cactus(identifier):
     else:
         return None
 
+def import_structure(inchi=None, smiles=None):
+
+    params = {}
+    if inchi:
+        params['inchi'] = inchi
+    elif smiles:
+        params['smiles'] = smiles
+    else:
+        raise Exception('Either inchi or smiles must be provided')
+
+    molecule = girder_client.post('molecules', json=params)
+
+    if not molecule:
+        raise Exception('Molecule could not be imported with params', params)
+
+    return GirderMolecule(molecule['_id'], molecule['cjson'])
+
 def find_structure(identifier, image_name=None, input_parameters=None, input_geometry=None):
     is_calc_query = (image_name is not None and input_parameters is not None)
 
