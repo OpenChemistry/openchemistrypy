@@ -286,6 +286,13 @@ def postprocess_description(task, _, input_, cluster, image, run_parameters, roo
         tf.seek(0)
         container_description = json.loads(tf.read().decode())
 
+    # Add code name and version to the taskflow metadata
+    code = {
+        'name': container_description.get('name'),
+        'version': container_description.get('version')
+    }
+    task.taskflow.set_metadata('code', code)
+
     # remove temporary description folder
     client.delete('folder/%s' % description_folder['_id'])
 
