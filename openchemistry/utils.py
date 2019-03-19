@@ -91,3 +91,22 @@ def calculate_mo(cjson, mo):
 
 def hash_object(obj):
     return hashlib.sha512(json.dumps(obj, sort_keys=True).encode()).hexdigest()
+
+def camel_to_space(s):
+    s = re.sub(r"""
+        (            # start the group
+            # alternative 1
+        (?<=[a-z])  # current position is preceded by a lower char
+                    # (positive lookbehind: does not consume any char)
+        [A-Z]       # an upper char
+                    #
+        |   # or
+            # alternative 2
+        (?<!\A)     # current position is not at the beginning of the string
+                    # (negative lookbehind: does not consume any char)
+        [A-Z]       # an upper char
+        (?=[a-z])   # matches if next char is a lower char
+                    # lookahead assertion: does not consume any char
+        )           # end the group""",
+    r' \1', s, flags=re.VERBOSE)
+    return s[0:1].upper() + s[1:]

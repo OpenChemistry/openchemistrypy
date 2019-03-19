@@ -9,7 +9,7 @@ import collections
 from abc import ABC, abstractmethod
 from jsonpath_rw import parse
 
-from .utils import lookup_file, calculate_mo, hash_object
+from .utils import lookup_file, calculate_mo, hash_object, camel_to_space
 import avogadro
 
 from .io.psi4 import Psi4Reader
@@ -555,7 +555,7 @@ class Properties(Visualization):
 
     def show(self, **kwargs):
         cjson = self._provider.cjson
-        properties = cjson.get('calculatedProperties', {})
+        properties = cjson.get('properties', {})
         try:
             from IPython.display import Markdown
             table = self._md_table(properties)
@@ -567,19 +567,17 @@ class Properties(Visualization):
     def _md_table(self, properties):
         import math
         table = '''### Calculated Properties
-| Name | Value | Units |
-|------|-------|-------|'''
+| Name | Value |
+|------|-------|'''
 
-        for prop in properties.values():
-            value = prop.get('value', math.nan)
+        for prop, value in properties.items():
             try:
                 value = float(value)
             except ValueError:
                 value = math.nan
-            table += '\n| %s | %.2f | %s |' % (
-                prop.get('label', ''),
-                value,
-                prop.get('units', '')
+            table += '\n| %s | %.2f |' % (
+                camel_to_space(prop),
+                value
             )
 
         return table
@@ -674,15 +672,15 @@ def _find_using_cactus(identifier):
     else:
         return None
 
-def import_structure(inchi=None, smiles=None):
+def import_structure(smiles=None, inchi=None):
 
     params = {}
-    if inchi:
-        params['inchi'] = inchi
-    elif smiles:
+    if smiles:
         params['smiles'] = smiles
+    elif inchi:
+        params['inchi'] = inchi
     else:
-        raise Exception('Either inchi or smiles must be provided')
+        raise Exception('Either SMILES or InChI must be provided')
 
     molecule = girder_client.post('molecules', json=params)
 
