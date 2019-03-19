@@ -1,8 +1,8 @@
 import json
 
 from .utils import _cclib_to_cjson_basis, _cclib_to_cjson_mocoeffs, _cclib_to_cjson_vibdisps
-
 from .base import BaseReader
+from .constants import EV_TO_J_MOL
 
 class Psi4Reader(BaseReader):
 
@@ -84,5 +84,11 @@ class Psi4Reader(BaseReader):
                 cjson.setdefault('metadata', {})['functional'] = metadata['functional'].lower()
             if 'methods' in metadata and len(metadata['methods']) > 0:
                 cjson.setdefault('metadata', {})['theory'] = metadata['methods'][0].lower()
+
+        # Add calculated properties
+        if hasattr(data, 'scfenergies'):
+            if len(data.scfenergies) > 0:
+                energy = data.scfenergies[-1] * EV_TO_J_MOL
+                cjson.setdefault('properties', {})['totalEnergy'] = energy
 
         return cjson
