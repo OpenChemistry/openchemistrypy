@@ -9,7 +9,7 @@ import collections
 from abc import ABC, abstractmethod
 from jsonpath_rw import parse
 
-from .utils import lookup_file, calculate_mo, hash_object
+from .utils import lookup_file, calculate_mo, hash_object, camel_to_space
 import avogadro
 
 from .io.psi4 import Psi4Reader
@@ -161,13 +161,16 @@ def _create_pending_calculation(molecule_id, image_name, input_parameters, input
 
     return calculation
 
-def _fetch_or_submit_calculation(molecule_id, image_name, input_parameters, input_geometry=None, run_parameters=None):
+def _delete_calculation(calculation_id):
+    girder_client.delete('calculations/%s' % calculation_id)
+
+def _fetch_or_submit_calculation(molecule_id, image_name, input_parameters, input_geometry=None, run_parameters=None, force=False):
     global cluster_id
 
     calculation = _fetch_calculation(molecule_id, image_name, input_parameters, input_geometry)
     taskflow_id = None
 
-    if calculation is None:
+    if calculation is None or force:
         calculation = _create_pending_calculation(molecule_id, image_name, input_parameters, input_geometry)
         taskflow_id = _submit_calculation(cluster_id, calculation['_id'], image_name, run_parameters)
         # Patch calculation to include taskflow id
@@ -244,9 +247,9 @@ class GirderMolecule(Molecule):
         super(GirderMolecule, self).__init__(CjsonProvider(cjson))
         self._id = _id
 
-    def calculate(self, image_name, input_parameters, input_geometry=None, run_parameters=None):
+    def calculate(self, image_name, input_parameters, input_geometry=None, run_parameters=None, force=False):
         molecule_id = self._id
-        calculation = _fetch_or_submit_calculation(molecule_id, image_name, input_parameters, input_geometry, run_parameters)
+        calculation = _fetch_or_submit_calculation(molecule_id, image_name, input_parameters, input_geometry, run_parameters, force)
         pending = parse('properties.pending').find(calculation)
         if pending:
             pending = pending[0].value
@@ -264,20 +267,20 @@ class GirderMolecule(Molecule):
 
         return calculation
 
-    def energy(self, image_name, input_parameters, input_geometry=None, run_parameters=None):
+    def energy(self, image_name, input_parameters, input_geometry=None, run_parameters=None, force=False):
         params = {'task': 'energy'}
         params.update(input_parameters)
-        return self.calculate(image_name, params, input_geometry, run_parameters)
+        return self.calculate(image_name, params, input_geometry, run_parameters, force)
 
-    def optimize(self, image_name, input_parameters, input_geometry=None, run_parameters=None):
+    def optimize(self, image_name, input_parameters, input_geometry=None, run_parameters=None, force=False):
         params = {'task': 'optimize'}
         params.update(input_parameters)
-        return self.calculate(image_name, params, input_geometry, run_parameters)
+        return self.calculate(image_name, params, input_geometry, run_parameters, force)
 
-    def frequencies(self, image_name, input_parameters, input_geometry=None, run_parameters=None):
+    def frequencies(self, image_name, input_parameters, input_geometry=None, run_parameters=None, force=False):
         params = {'task': 'frequencies'}
         params.update(input_parameters)
-        return self.calculate(image_name, params, input_geometry, run_parameters)
+        return self.calculate(image_name, params, input_geometry, run_parameters, force)
 
 class CalculationResult(Molecule):
 
@@ -292,6 +295,9 @@ class CalculationResult(Molecule):
         import warnings
         warnings.warn("Use the 'vibrations' property to display normal modes")
         return self.vibrations
+
+    def delete(self):
+        return _delete_calculation(self._id)
 
 class DataProvider(ABC):
     @property
@@ -549,7 +555,7 @@ class Properties(Visualization):
 
     def show(self, **kwargs):
         cjson = self._provider.cjson
-        properties = cjson.get('calculatedProperties', {})
+        properties = cjson.get('properties', {})
         try:
             from IPython.display import Markdown
             table = self._md_table(properties)
@@ -561,19 +567,17 @@ class Properties(Visualization):
     def _md_table(self, properties):
         import math
         table = '''### Calculated Properties
-| Name | Value | Units |
-|------|-------|-------|'''
+| Name | Value |
+|------|-------|'''
 
-        for prop in properties.values():
-            value = prop.get('value', math.nan)
+        for prop, value in properties.items():
             try:
                 value = float(value)
             except ValueError:
                 value = math.nan
-            table += '\n| %s | %.2f | %s |' % (
-                prop.get('label', ''),
-                value,
-                prop.get('units', '')
+            table += '\n| %s | %.2f |' % (
+                camel_to_space(prop),
+                value
             )
 
         return table
@@ -647,6 +651,23 @@ class Reaction(object):
     @property
     def equation(self):
         return '%s => %s' % (' + '.join(self.reactants), ' + '.join(self.products))
+
+def import_structure(smiles=None, inchi=None):
+
+    params = {}
+    if smiles:
+        params['smiles'] = smiles
+    elif inchi:
+        params['inchi'] = inchi
+    else:
+        raise Exception('Either SMILES or InChI must be provided')
+
+    molecule = girder_client.post('molecules', json=params)
+
+    if not molecule:
+        raise Exception('Molecule could not be imported with params', params)
+
+    return GirderMolecule(molecule['_id'], molecule['cjson'])
 
 _inchi_key_regex = re.compile("^([0-9A-Z\-]+)$")
 
