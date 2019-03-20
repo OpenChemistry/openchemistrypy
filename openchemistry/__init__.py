@@ -722,8 +722,8 @@ def find_structure(identifier=None, image_name=None, input_parameters=None, inpu
 
         except HttpError as ex:
             if ex.status == 404:
-                # Use cactus to try a lookup the structure
-                molecule = _find_using_cactus(identifier)
+                # Use cactus after this code block to lookup the structure
+                pass
             else:
                 raise
 
