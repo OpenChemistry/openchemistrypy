@@ -686,25 +686,30 @@ def find_structure_by_inchi_or_smiles(inchi=None, smiles=None):
      # This will return a list of molecules. Only keep the first one.
     return molecules[0]
 
-def find_structure(identifier=None, image_name=None, input_parameters=None, input_geometry=None, inchi=None, smiles=None):
+
+def _get_molecule_or_calculation_result(molecule, image_name, input_parameters, input_geometry):
     is_calc_query = (image_name is not None and input_parameters is not None)
+
+    # Are we searching for a specific calculation?
+    if is_calc_query:
+        # Look for optimization calculation
+        cal = _fetch_calculation(molecule['_id'], image_name, input_parameters, input_geometry)
+
+        if cal is not None:
+            # TODO We should probably pass in the full calculation
+            # so we don't have to fetch it again.
+            return CalculationResult(cal['_id'])
+        else:
+            return None
+    else:
+        return GirderMolecule(molecule['_id'], molecule['cjson'])
+
+
+def find_structure(identifier=None, image_name=None, input_parameters=None, input_geometry=None, inchi=None, smiles=None):
 
     if inchi or smiles:
         molecule = find_structure_by_inchi_or_smiles(inchi, smiles)
-
-        # Are we searching for a specific calculation?
-        if is_calc_query:
-            # Look for optimization calculation
-            cal = _fetch_calculation(molecule['_id'], image_name, input_parameters, input_geometry)
-
-            if cal is not None:
-                # TODO We should probably pass in the full calculation
-                # so we don't have to fetch it again.
-                return CalculationResult(cal['_id'])
-            else:
-                return None
-        else:
-            return GirderMolecule(molecule['_id'], molecule['cjson'])
+        return _get_molecule_or_calculation_result(molecule, image_name, input_parameters, input_geometry)
 
     if not identifier:
         raise Exception('identifier, inchi, or smiles must be set')
@@ -713,20 +718,8 @@ def find_structure(identifier=None, image_name=None, input_parameters=None, inpu
     if _is_inchi_key(identifier):
         try:
             molecule = girder_client.get('molecules/inchikey/%s' % identifier)
+            return _get_molecule_or_calculation_result(molecule, image_name, input_parameters, input_geometry)
 
-            # Are we search for a specific calculation?
-            if is_calc_query:
-                # Look for optimization calculation
-                cal = _fetch_calculation(molecule['_id'], image_name, input_parameters, input_geometry)
-
-                if cal is not None:
-                    # TODO We should probably pass in the full calculation
-                    # so we don't have to fetch it again.
-                    return CalculationResult(cal['_id'])
-                else:
-                    return None
-            else:
-                return GirderMolecule(molecule['_id'], molecule['cjson'])
         except HttpError as ex:
             if ex.status == 404:
                 # Use cactus to try a lookup the structure
@@ -736,6 +729,7 @@ def find_structure(identifier=None, image_name=None, input_parameters=None, inpu
 
     # If we have been provided basis, theory or functional and we haven't found
     # a calculation, then we are done.
+    is_calc_query = (image_name is not None and input_parameters is not None)
     if is_calc_query:
         return None
 
