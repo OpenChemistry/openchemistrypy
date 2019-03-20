@@ -723,7 +723,9 @@ def _get_molecule_or_calculation_result(molecule, image_name, input_parameters, 
         else:
             return None
     else:
-        return GirderMolecule(molecule['_id'], molecule['cjson'])
+        # If this was found by InChI or SMILES, it may not have cjson,
+        # but GirderMolecule() will get the cjson via another rest call.
+        return GirderMolecule(molecule['_id'], molecule.get('cjson'))
 
 
 def find_structure(identifier=None, image_name=None, input_parameters=None, input_geometry=None, inchi=None, smiles=None):
