@@ -652,23 +652,6 @@ class Reaction(object):
     def equation(self):
         return '%s => %s' % (' + '.join(self.reactants), ' + '.join(self.products))
 
-def import_structure(smiles=None, inchi=None):
-
-    params = {}
-    if smiles:
-        params['smiles'] = smiles
-    elif inchi:
-        params['inchi'] = inchi
-    else:
-        raise Exception('Either SMILES or InChI must be provided')
-
-    molecule = girder_client.post('molecules', json=params)
-
-    if not molecule:
-        raise Exception('Molecule could not be imported with params', params)
-
-    return GirderMolecule(molecule['_id'], molecule['cjson'])
-
 _inchi_key_regex = re.compile("^([0-9A-Z\-]+)$")
 
 def _is_inchi_key(identifier):
@@ -688,6 +671,25 @@ def _find_using_cactus(identifier):
         return GirderMolecule(molecule['_id'], molecule['cjson'])
     else:
         return None
+
+def import_structure(smiles=None, inchi=None, cjson=None):
+
+    params = {}
+    if smiles:
+        params['smiles'] = smiles
+    elif inchi:
+        params['inchi'] = inchi
+    elif cjson:
+        params['cjson'] = cjson
+    else:
+        raise Exception('SMILES, InChI, or CJson must be provided')
+
+    molecule = girder_client.post('molecules', json=params)
+
+    if not molecule:
+        raise Exception('Molecule could not be imported with params', params)
+
+    return GirderMolecule(molecule['_id'], molecule['cjson'])
 
 def find_structure_by_inchi_or_smiles(inchi=None, smiles=None):
     params = {}
