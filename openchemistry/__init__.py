@@ -672,15 +672,17 @@ def _find_using_cactus(identifier):
     else:
         return None
 
-def import_structure(smiles=None, inchi=None):
+def import_structure(smiles=None, inchi=None, cjson=None):
 
     params = {}
     if smiles:
         params['smiles'] = smiles
     elif inchi:
         params['inchi'] = inchi
+    elif cjson:
+        params['cjson'] = cjson
     else:
-        raise Exception('Either SMILES or InChI must be provided')
+        raise Exception('SMILES, InChI, or CJson must be provided')
 
     molecule = girder_client.post('molecules', json=params)
 
