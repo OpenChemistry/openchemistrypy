@@ -408,23 +408,29 @@ def _create_job(task, cluster, image, run_parameters, container_description, inp
             'path': './scratch'
         })
 
+    commands = [
+        'mkdir output',
+        'mkdir scratch'
+    ]
+
     if container == 'docker':
         mount_option = '-v %s:%s' % (host_dir, guest_dir)
+        # In the docker case we need to ensure the image has been pull on this
+        # node, as the images are not shared across the nodes.
+        commands.append('docker pull %s' % image_uri)
     else:
         mount_option = ''
+
+    commands.append('%s run %s %s -g %s -p %s -o %s -s %s' % (
+            container, mount_option, image_uri,
+            geometry_filename, parameters_filename,
+            output_filename, scratch_dir
+        ))
 
     body = {
         # ensure there are no special characters in the submission script name
         'name': 'run_%s' % re.sub('[^a-zA-Z0-9]', '_', repository),
-        'commands': [
-            'mkdir output',
-            'mkdir scratch',
-            '%s run %s %s -g %s -p %s -o %s -s %s' % (
-                container, mount_option, image_uri,
-                geometry_filename, parameters_filename,
-                output_filename, scratch_dir
-            )
-        ],
+        'commands': commands,
         'input': [
             {
               'folderId': input_folder['_id'],
