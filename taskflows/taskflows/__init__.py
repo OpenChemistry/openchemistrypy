@@ -511,6 +511,10 @@ def postprocess_job(task, _, input_, cluster, image, run_parameters, root_folder
         raise Exception('The calculation did not produce any output file.')
 
     # Now call endpoint to ingest result
+    params = {
+        'detectBonds': True
+    }
+
     body = {
         'fileId': output_file['_id'],
         'format': output_format,
@@ -518,4 +522,5 @@ def postprocess_job(task, _, input_, cluster, image, run_parameters, root_folder
         'image': image, # image now also has a digest field, add it to the calculation
         'scratchFolderId': scratch_folder_id
     }
-    client.put('calculations/%s' % input_['calculation']['_id'], json=body)
+
+    client.put('calculations/%s' % input_['calculation']['_id'], parameters=params, json=body)
