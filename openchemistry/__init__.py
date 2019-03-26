@@ -244,7 +244,7 @@ class GirderMolecule(Molecule):
     def __init__(self, _id, cjson=None):
         if cjson is None:
             cjson = girder_client.get('molecules/%s/cjson' % _id)
-        super(GirderMolecule, self).__init__(CjsonProvider(cjson))
+        super(GirderMolecule, self).__init__(MoleculeProvider(cjson, _id))
         self._id = _id
 
     def calculate(self, image_name, input_parameters, input_geometry=None, run_parameters=None, force=False):
@@ -363,6 +363,15 @@ class CjsonProvider(CachedDataProvider):
     @property
     def url(self):
         return None
+
+class MoleculeProvider(CjsonProvider):
+    def __init__(self, cjson, molecule_id):
+        super(MoleculeProvider, self).__init__(cjson)
+        self._id = molecule_id
+
+    @property
+    def url(self):
+        return '%s/molecules/%s' % (app_base_url.rstrip('/'), self._id)
 
 class CalculationProvider(CachedDataProvider):
     def __init__(self, calculation_id, molecule_id):
