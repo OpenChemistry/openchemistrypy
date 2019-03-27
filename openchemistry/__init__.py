@@ -282,6 +282,12 @@ class GirderMolecule(Molecule):
         params.update(input_parameters)
         return self.calculate(image_name, params, input_geometry, run_parameters, force)
 
+    def set_name(self, name):
+        body = {
+            'name': name
+        }
+        girder_client.patch('molecules/%s' % self._id, json=body)
+
 class CalculationResult(Molecule):
 
     def __init__(self, _id=None, properties=None, molecule_id=None):
