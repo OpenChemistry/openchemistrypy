@@ -299,6 +299,9 @@ class CalculationResult(Molecule):
         self._properties = properties
         self._molecule_id = molecule_id
 
+    def data(self):
+        return self._provider.cjson
+
     @property
     def frequencies(self):
         import warnings
@@ -458,6 +461,10 @@ class Visualization(ABC):
             else:
                 print(alt)
 
+    @abstractmethod
+    def data(self):
+        return self._provider.cjson
+
     def url(self):
         url = self._provider.url
         if url is None:
@@ -516,10 +523,16 @@ class Structure(Visualization):
     def show(self, viewer='moljs', menu=True, **kwargs):
         return super(Structure, self).show(viewer=viewer, menu=menu, **kwargs)
 
+    def data(self):
+        return self._provider.cjson
+
 class Vibrations(Visualization):
 
     def show(self, viewer='moljs', spectrum=True, menu=True, mode=-1, play=True, **kwargs):
         return super(Vibrations, self).show(viewer=viewer, spectrum=spectrum, menu=menu, mode=mode, play=play, **kwargs)
+
+    def data(self):
+        return self._provider.vibrations
 
     def table(self):
         vibrations = self._provider.vibrations
@@ -569,6 +582,14 @@ class Orbitals(Visualization):
         self._provider.load_orbital(mo)
         return super(Orbitals, self).show(viewer=viewer, volume=volume, isosurface=isosurface, menu=menu, mo=mo, iso=iso, transfer_function=transfer_function)
 
+    def data(self):
+        whitelist = ['orbitals', 'properties']
+        output = {}
+        for item in whitelist:
+            output[item] = self._provider.cjson[item]
+
+        return output
+
 class Properties(Visualization):
 
     def show(self, **kwargs):
@@ -581,6 +602,9 @@ class Properties(Visualization):
         except ImportError:
             # Outside notebook print CJSON
             print(properties)
+
+    def data(self):
+        return self._provider.cjson.get('properties', {})
 
     def _md_table(self, properties):
         import math
