@@ -22,9 +22,12 @@ girder_scheme = os.environ.get('GIRDER_SCHEME', 'http')
 girder_api_root = os.environ.get('GIRDER_API_ROOT', '/api/v1')
 girder_api_key = os.environ.get('GIRDER_API_KEY')
 girder_token = os.environ.get('GIRDER_TOKEN')
-girder_api_url = '%s://%s%s/%s' % (
-    girder_scheme, girder_host, ':%s' % girder_port if girder_port else '',
-    girder_api_root )
+# First check if we have a public url set
+girder_api_url = os.environ.get('GIRDER_PUBLIC_API_URL')
+if girder_api_url is None:
+    girder_api_url = '%s://%s%s/%s' % (
+        girder_scheme, girder_host, ':%s' % girder_port if girder_port else '',
+        girder_api_root )
 app_base_url = os.environ.get('APP_BASE_URL')
 cluster_id = os.environ.get('CLUSTER_ID')
 jupyterhub_url = os.environ.get('OC_JUPYTERHUB_URL')
