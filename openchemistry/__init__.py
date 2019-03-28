@@ -296,6 +296,9 @@ class CalculationResult(Molecule):
         self._properties = properties
         self._molecule_id = molecule_id
 
+    def data(self):
+        return self._provider.cjson
+
     @property
     def frequencies(self):
         import warnings
@@ -577,7 +580,12 @@ class Orbitals(Visualization):
         return super(Orbitals, self).show(viewer=viewer, volume=volume, isosurface=isosurface, menu=menu, mo=mo, iso=iso, transfer_function=transfer_function)
 
     def data(self):
-        return self._provider.cjson
+        whitelist = ['orbitals', 'properties']
+        output = {}
+        for item in whitelist:
+            output[item] = self._provider.cjson[item]
+
+        return output
 
 class Properties(Visualization):
 
