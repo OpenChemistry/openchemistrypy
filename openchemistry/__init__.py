@@ -713,6 +713,11 @@ def _find_using_cactus(identifier):
 
 def import_structure(smiles=None, inchi=None, cjson=None):
 
+    # If the smiles begins with 'InChI=', then it is actually an inchi instead
+    if smiles and smiles.startswith('InChI='):
+        inchi = smiles
+        smiles = None
+
     params = {}
     if smiles:
         params['smiles'] = smiles
