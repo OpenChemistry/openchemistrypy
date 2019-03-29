@@ -16,8 +16,6 @@ import json
 import tempfile
 import re
 
-from .utils import cjson_to_xyz
-
 class OpenChemistryTaskFlow(TaskFlow):
     """
     {
@@ -321,17 +319,20 @@ def setup_input(task, input_, cluster, image, run_parameters, root_folder, conta
 
     input_parameters = calculation.get('input', {}).get('parameters', {})
 
-    # Fetch the starting geometry
-    input_geometry = calculation.get('input', {}).get('geometry', None)
-    if input_geometry is None:
-        r = client.get('molecules/%s/cjson' % molecule_id, jsonResp=False)
-        cjson = r.json()
-    else:
-        # TODO: implement the path where a specific input geometry exists
-        raise NotImplementedError('Running a calculation with a specific geometry is not implemented yet.')
-
     input_format = container_description['input']['format']
     output_format = container_description['output']['format']
+
+    # Fetch the starting geometry
+    r = client.get('molecules/%s/%s' % (molecule_id, input_format),
+                   jsonResp=False)
+
+    if r.status_code != 200:
+        raise Exception('Failed to get molecule in format: ' + input_format)
+
+    if input_format == 'cjson':
+        geometry_data = r.json()
+    else:
+        geometry_data = r.content.decode('utf-8')
 
     # The folder where the input geometry and input parameters are
     input_folder = client.createFolder(root_folder['_id'], 'input')
@@ -352,8 +353,7 @@ def setup_input(task, input_, cluster, image, run_parameters, root_folder, conta
 
     # Save the input geometry to file
     with tempfile.TemporaryFile() as fp:
-        content = _convert_geometry(cjson, input_format)
-        fp.write(content.encode())
+        fp.write(geometry_data.encode())
         # Get the size of the file
         size = fp.seek(0, 2)
         fp.seek(0)
@@ -362,14 +362,6 @@ def setup_input(task, input_, cluster, image, run_parameters, root_folder, conta
                                     parentType='folder')
 
     submit_calculation.delay(input_, cluster, image, run_parameters, root_folder, container_description, input_folder, output_folder, scratch_folder)
-
-def _convert_geometry(cjson, input_format):
-    if input_format.lower() == 'xyz':
-        return cjson_to_xyz(cjson)
-    elif input_format.lower() == 'cjson':
-        return json.dumps(cjson)
-    else:
-        raise Exception('The container is requesting an unsupported geometry format %s') % input_format
 
 def _create_job(task, cluster, image, run_parameters, container_description, input_folder, output_folder, scratch_folder):
     params = _get_job_parameters(cluster, image, run_parameters)
