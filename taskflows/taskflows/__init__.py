@@ -339,6 +339,8 @@ def setup_input(task, input_, cluster, image, run_parameters, root_folder, conta
     output_folder = client.createFolder(root_folder['_id'], 'output')
     # The folder where the raw input/output files of the specific code are stored
     scratch_folder = client.createFolder(root_folder['_id'], 'scratch')
+    # The folder where the cluster stdout and stderr is saved
+    run_folder = client.createFolder(root_folder['_id'], 'run')
 
     # Save the input parameters to file
     with tempfile.TemporaryFile() as fp:
@@ -361,7 +363,7 @@ def setup_input(task, input_, cluster, image, run_parameters, root_folder, conta
         input_geometry_file = client.uploadFile(input_folder['_id'],  fp, name, size,
                                     parentType='folder')
 
-    submit_calculation.delay(input_, cluster, image, run_parameters, root_folder, container_description, input_folder, output_folder, scratch_folder)
+    submit_calculation.delay(input_, cluster, image, run_parameters, root_folder, container_description, input_folder, output_folder, scratch_folder, run_folder)
 
 def _convert_geometry(cjson, input_format):
     if input_format.lower() == 'xyz':
@@ -371,7 +373,7 @@ def _convert_geometry(cjson, input_format):
     else:
         raise Exception('The container is requesting an unsupported geometry format %s') % input_format
 
-def _create_job(task, cluster, image, run_parameters, container_description, input_folder, output_folder, scratch_folder):
+def _create_job(task, cluster, image, run_parameters, container_description, input_folder, output_folder, scratch_folder, run_folder):
     params = _get_job_parameters(cluster, image, run_parameters)
     container = params['container']
     image_uri = params['imageUri']
@@ -398,6 +400,15 @@ def _create_job(task, cluster, image, run_parameters, container_description, inp
         {
             'folderId': output_folder['_id'],
             'path': './output'
+        },
+        {
+            'folderId': run_folder['_id'],
+            'path': '.',
+            'exclude': [
+                'input',
+                'output',
+                'scratch'
+            ]
         }
     ]
 
@@ -459,8 +470,8 @@ def _demo(cluster):
     return cluster.get('name') == 'demo_cluster'
 
 @cumulus.taskflow.task
-def submit_calculation(task, input_, cluster, image, run_parameters, root_folder, container_description, input_folder, output_folder, scratch_folder):
-    job = _create_job(task, cluster, image, run_parameters, container_description, input_folder, output_folder, scratch_folder)
+def submit_calculation(task, input_, cluster, image, run_parameters, root_folder, container_description, input_folder, output_folder, scratch_folder, run_folder):
+    job = _create_job(task, cluster, image, run_parameters, container_description, input_folder, output_folder, scratch_folder, run_folder)
 
     girder_token = task.taskflow.girder_token
     task.taskflow.set_metadata('cluster', cluster)
@@ -477,10 +488,10 @@ def submit_calculation(task, input_, cluster, image, run_parameters, root_folder
 
     monitor_job.apply_async((cluster, job), {'girder_token': girder_token,
                                              'monitor_interval': 10},
-                            link=postprocess_job.s(input_, cluster, image, run_parameters, root_folder, container_description, input_folder, output_folder, scratch_folder, job))
+                            link=postprocess_job.s(input_, cluster, image, run_parameters, root_folder, container_description, input_folder, output_folder, scratch_folder, run_folder, job))
 
 @cumulus.taskflow.task
-def postprocess_job(task, _, input_, cluster, image, run_parameters, root_folder, container_description, input_folder, output_folder, scratch_folder, job):
+def postprocess_job(task, _, input_, cluster, image, run_parameters, root_folder, container_description, input_folder, output_folder, scratch_folder, run_folder, job):
     task.taskflow.logger.info('Processing the results of the job.')
     client = create_girder_client(
         task.taskflow.girder_api_url, task.taskflow.girder_token)
@@ -489,6 +500,9 @@ def postprocess_job(task, _, input_, cluster, image, run_parameters, root_folder
     job = client.get('jobs/%s' % job['_id'])
 
     upload_job_output_to_folder(cluster, job, girder_token=task.taskflow.girder_token)
+
+    # remove the run folder, only useful to access the stdout and stderr after the job is done
+    client.delete('folder/%s' % run_folder['_id'])
 
     # remove temporary input folder folder, this data is attached to the calculation model
     client.delete('folder/%s' % input_folder['_id'])
