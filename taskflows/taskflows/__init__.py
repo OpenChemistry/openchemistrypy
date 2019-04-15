@@ -146,10 +146,10 @@ def start(task, input_, cluster, image, run_parameters):
     job = _create_description_job(task, cluster, description_folder, image, run_parameters)
 
     # Now download pull.py script to the cluster
-    task.taskflow.logger.info('Downloading description input files to cluster.')
+    task.taskflow.logger.info('Preparing job to obtain the container description.')
     download_job_input_folders(cluster, job,
                                girder_token=task.taskflow.girder_token, submit=False)
-    task.taskflow.logger.info('Downloading complete.')
+    task.taskflow.logger.info('Submitting job to obtain the container description.')
 
     submit_job(cluster, job, girder_token=task.taskflow.girder_token, monitor=False)
 
@@ -243,7 +243,7 @@ def _create_description_job(task, cluster, description_folder, image, run_parame
 
 @cumulus.taskflow.task
 def postprocess_description(task, _, input_, cluster, image, run_parameters, root_folder, description_job, description_folder):
-    task.taskflow.logger.info('Processing description job output.')
+    task.taskflow.logger.info('Processing the output of the container description job.')
 
     client = create_girder_client(
         task.taskflow.girder_api_url, task.taskflow.girder_token)
@@ -314,7 +314,7 @@ def postprocess_description(task, _, input_, cluster, image, run_parameters, roo
 
 @cumulus.taskflow.task
 def setup_input(task, input_, cluster, image, run_parameters, root_folder, container_description):
-    task.taskflow.logger.info('Setting up calculation input.')
+    task.taskflow.logger.info('Setting up the calculation input files.')
 
     client = create_girder_client(
         task.taskflow.girder_api_url, task.taskflow.girder_token)
@@ -403,7 +403,7 @@ def _create_job(task, cluster, image, run_parameters, container_description, inp
     guest_dir = params['guestDir']
     job_dir = params['jobDir']
 
-    task.taskflow.logger.info('Create %s job' % repository)
+    task.taskflow.logger.info('Creating %s job' % repository)
 
     input_format = container_description['input']['format']
     output_format = container_description['output']['format']
@@ -521,12 +521,11 @@ def submit_calculation(task, input_, cluster, image, run_parameters, root_folder
     task.taskflow.set_metadata('cluster', cluster)
 
     # Now download and submit job to the cluster
-    task.taskflow.logger.info('Downloading input files to cluster.')
+    task.taskflow.logger.info('Uploading the input files to the cluster.')
     download_job_input_folders(cluster, job,
                                girder_token=girder_token, submit=False)
-    task.taskflow.logger.info('Downloading complete.')
 
-    task.taskflow.logger.info('Submitting job %s to cluster.' % job['_id'])
+    task.taskflow.logger.info('Submitting the calculation job %s to the queue.' % job['_id'])
 
     submit_job(cluster, job, girder_token=girder_token, monitor=False)
 
@@ -536,7 +535,7 @@ def submit_calculation(task, input_, cluster, image, run_parameters, root_folder
 
 @cumulus.taskflow.task
 def postprocess_job(task, _, input_, cluster, image, run_parameters, root_folder, container_description, input_folder, output_folder, scratch_folder, run_folder, job):
-    task.taskflow.logger.info('Processing the results of the job.')
+    task.taskflow.logger.info('Processing the results of the calculation.')
     client = create_girder_client(
         task.taskflow.girder_api_url, task.taskflow.girder_token)
 
@@ -586,6 +585,8 @@ def postprocess_job(task, _, input_, cluster, image, run_parameters, root_folder
         'detectBonds': True
     }
 
+    task.taskflow.logger.info('Uploading the results of the calculation to the database.')
+
     body = {
         'fileId': output_file['_id'],
         'format': output_format,
@@ -595,3 +596,5 @@ def postprocess_job(task, _, input_, cluster, image, run_parameters, root_folder
     }
 
     client.put('calculations/%s' % input_['calculation']['_id'], parameters=params, json=body)
+
+    task.taskflow.logger.info('Done!')
