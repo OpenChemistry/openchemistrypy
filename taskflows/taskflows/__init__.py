@@ -123,7 +123,9 @@ def start(task, input_, cluster, image, run_parameters):
         cluster = _get_cori(client)
 
     if '_id' not in cluster:
-        raise Exception('Invalid cluster configurations: %s' % cluster)
+        msg = 'Invalid cluster configurations: %s' % cluster
+        _log_error(task, msg)
+        raise Exception(msg)
 
     oc_folder = _get_oc_folder(client)
     root_folder = client.createFolder(oc_folder['_id'],
@@ -259,20 +261,32 @@ def postprocess_description(task, _, input_, cluster, image, run_parameters, roo
         if item['name'] == 'description.json':
             files = list(client.listFile(item['_id']))
             if len(files) != 1:
-                raise Exception('Expecting a single file under item, found: %s' + len(files))
+                _log_std_err(task, client, description_folder)
+                msg = 'Expecting a single file under item, found: %s' % len(files)
+                _log_error(task, msg)
+                raise Exception(msg)
             description_file = files[0]
 
         elif item['name'] == 'pull.json':
             files = list(client.listFile(item['_id']))
             if len(files) != 1:
-                raise Exception('Expecting a single file under item, found: %s' + len(files))
+                _log_std_err(task, client, description_folder)
+                msg = 'Expecting a single file under item, found: %s' % len(files)
+                _log_error(task, msg)
+                raise Exception(msg)
             pull_file = files[0]
 
     if pull_file is None:
-        raise Exception('There was an error trying to pull the requested container image')
+        _log_std_err(task, client, description_folder)
+        msg = 'There was an error trying to pull the requested container image'
+        _log_error(task, msg)
+        raise Exception(msg)
 
     if description_file is None:
-        raise Exception('The container does not implement correctly the --description flag')
+        _log_std_err(task, client, description_folder)
+        msg = 'The container does not implement correctly the --description flag'
+        _log_error(task, msg)
+        raise Exception(msg)
 
     with tempfile.TemporaryFile() as tf:
         client.downloadFile(pull_file['_id'], tf)
@@ -309,11 +323,15 @@ def setup_input(task, input_, cluster, image, run_parameters, root_folder, conta
         cluster = _get_cori(client)
 
     if '_id' not in cluster:
-        raise Exception('Invalid cluster configurations: %s' % cluster)
+        msg = 'Invalid cluster configurations: %s' % cluster
+        _log_error(task, msg)
+        raise Exception(msg)
 
     calculation_id = parse('calculation._id').find(input_)
     if not calculation_id:
-        raise Exception('Unable to extract calculation id.')
+        msg = 'Unable to extract calculation id.'
+        _log_error(task, msg)
+        raise Exception(msg)
 
     calculation_id = calculation_id[0].value
     calculation = client.get('calculations/%s' % calculation_id)
@@ -354,7 +372,7 @@ def setup_input(task, input_, cluster, image, run_parameters, root_folder, conta
 
     # Save the input geometry to file
     with tempfile.TemporaryFile() as fp:
-        content = _convert_geometry(cjson, input_format)
+        content = _convert_geometry(task, cjson, input_format)
         fp.write(content.encode())
         # Get the size of the file
         size = fp.seek(0, 2)
@@ -365,13 +383,15 @@ def setup_input(task, input_, cluster, image, run_parameters, root_folder, conta
 
     submit_calculation.delay(input_, cluster, image, run_parameters, root_folder, container_description, input_folder, output_folder, scratch_folder, run_folder)
 
-def _convert_geometry(cjson, input_format):
+def _convert_geometry(task, cjson, input_format):
     if input_format.lower() == 'xyz':
         return cjson_to_xyz(cjson)
     elif input_format.lower() == 'cjson':
         return json.dumps(cjson)
     else:
-        raise Exception('The container is requesting an unsupported geometry format %s') % input_format
+        msg = 'The container is requesting an unsupported geometry format %s' % input_format
+        _log_error(task, msg)
+        raise Exception(msg)
 
 def _create_job(task, cluster, image, run_parameters, container_description, input_folder, output_folder, scratch_folder, run_folder):
     params = _get_job_parameters(cluster, image, run_parameters)
@@ -469,6 +489,30 @@ def _nersc(cluster):
 def _demo(cluster):
     return cluster.get('name') == 'demo_cluster'
 
+def _log_error(task, msg):
+    task.taskflow.logger.info('ERROR: %s' % msg)
+
+def _log_std_err(task, client, run_folder):
+    errors = _get_std_err(client, run_folder)
+    for e in errors:
+        _log_error(task, e)
+
+def _get_std_err(client, run_folder):
+    error_regex = re.compile(r'^.*\.e\d*$', re.IGNORECASE)
+    output_items = list(client.listItem(run_folder['_id']))
+    errors = []
+    for item in output_items:
+        if error_regex.match(item['name']):
+            files = list(client.listFile(item['_id']))
+            if len(files) != 1:
+                continue
+            with tempfile.TemporaryFile() as tf:
+                client.downloadFile(files[0]['_id'], tf)
+                tf.seek(0)
+                contents = tf.read().decode()
+                errors.append(contents)
+    return errors
+
 @cumulus.taskflow.task
 def submit_calculation(task, input_, cluster, image, run_parameters, root_folder, container_description, input_folder, output_folder, scratch_folder, run_folder):
     job = _create_job(task, cluster, image, run_parameters, container_description, input_folder, output_folder, scratch_folder, run_folder)
@@ -501,9 +545,6 @@ def postprocess_job(task, _, input_, cluster, image, run_parameters, root_folder
 
     upload_job_output_to_folder(cluster, job, girder_token=task.taskflow.girder_token)
 
-    # remove the run folder, only useful to access the stdout and stderr after the job is done
-    client.delete('folder/%s' % run_folder['_id'])
-
     # remove temporary input folder folder, this data is attached to the calculation model
     client.delete('folder/%s' % input_folder['_id'])
 
@@ -523,12 +564,22 @@ def postprocess_job(task, _, input_, cluster, image, run_parameters, root_folder
         if item['name'] == 'output.%s' % output_format:
             files = list(client.listFile(item['_id']))
             if len(files) != 1:
-                raise Exception('Expecting a single file under item, found: %s' + len(files))
+                _log_std_err(task, client, run_folder)
+                msg = 'Expecting a single file under item, found: %s' % len(files)
+                _log_error(task, msg)
+                raise Exception(msg)
             output_file = files[0]
             break
 
     if output_file is None:
-        raise Exception('The calculation did not produce any output file.')
+        # Log the job stderr
+        _log_std_err(task, client, run_folder)
+        msg = 'The calculation did not produce any output file.'
+        _log_error(task, msg)
+        raise Exception(msg)
+
+    # remove the run folder, only useful to access the stdout and stderr after the job is done
+    client.delete('folder/%s' % run_folder['_id'])
 
     # Now call endpoint to ingest result
     params = {
