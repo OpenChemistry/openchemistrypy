@@ -165,13 +165,21 @@ def _get_job_parameters(task, cluster, image, run_parameters):
     guest_dir = '/data' # the directory inside the container pointing to host_dir
     job_dir = '' # relative path from guest_dir to the job directory
     setup_commands = []
+    job_parameters = {
+        'taskFlowId': task.taskflow.id
+    }
 
     # Override default parameters depending on the cluster we are running on
 
     if _nersc(cluster):
         # NERSC specific options
-        container = 'singularity' # no root access, only singularity is supported
-        raise NotImplementedError('Cannot run on NERSC yet')
+        container = 'shifter' # no root access, only singularity is supported
+        job_parameters.update({
+            'numberOfNodes': 1,
+            'queue': 'debug',
+            'constraint': 'haswell',
+            'account': os.environ.get('OC_ACCOUNT')
+        })
     elif _demo(cluster):
         # DEV/DEMO environment options
         host_dir = 'dev_job_data'
@@ -190,25 +198,28 @@ def _get_job_parameters(task, cluster, image, run_parameters):
         'hostDir': host_dir,
         'guestDir': guest_dir,
         'jobDir': job_dir,
-        'setupCommands': setup_commands
+        'setupCommands': setup_commands,
+        'jobParameters': job_parameters
     }
 
 def _create_description_job(task, cluster, description_folder, image, run_parameters):
-    params = _get_job_parameters(cluster, image, run_parameters)
+    params = _get_job_parameters(task, cluster, image, run_parameters)
     container = params['container']
     setup_commands = params['setupCommands']
     repository = params['repository']
     tag = params['tag']
-
-    job_params = {
-        'taskFlowId': task.taskflow.id
-    }
+    job_parameters = params['jobParameters'];
 
     output_file = 'description.json'
 
+    run_command = '%s run $IMAGE_NAME' % container
+    # Shifter has a pretty different sytax so special case it.
+    if container == 'shifter':
+        run_command = 'shifter --image=$IMAGE_NAME --entrypoint --'
+
     commands = setup_commands + [
         'IMAGE_NAME=$(python pull.py -r %s -t %s -c %s | tail -1)' % (repository, tag, container),
-        '%s run $IMAGE_NAME -d > %s' % (container, output_file),
+        '%s -d > %s' % (run_command, output_file),
         'rm pull.py'
     ]
 
@@ -229,7 +240,7 @@ def _create_description_job(task, cluster, description_folder, image, run_parame
             }
         ],
         'uploadOutput': False,
-        'params': job_params
+        'params': job_parameters
     }
 
     client = create_girder_client(
@@ -380,7 +391,7 @@ def _convert_geometry(cjson, input_format):
         raise Exception('The container is requesting an unsupported geometry format %s') % input_format
 
 def _create_job(task, cluster, image, run_parameters, container_description, input_folder, output_folder, scratch_folder):
-    params = _get_job_parameters(cluster, image, run_parameters)
+    params = _get_job_parameters(task, cluster, image, run_parameters)
     container = params['container']
     image_uri = params['imageUri']
     repository = params['repository']
@@ -388,6 +399,7 @@ def _create_job(task, cluster, image, run_parameters, container_description, inp
     host_dir = params['hostDir']
     guest_dir = params['guestDir']
     job_dir = params['jobDir']
+    job_parameters = params['jobParameters'];
 
     task.taskflow.logger.info('Create %s job' % repository)
 
@@ -421,19 +433,43 @@ def _create_job(task, cluster, image, run_parameters, container_description, inp
         'mkdir scratch'
     ]
 
+    # Each contain has a different bind arg
+    bind_args = {
+        'docker': '-v',
+        'singularity': '-B',
+        'shifter': '-V'
+    }
+
+    mount_option = '%s %s:%s' % (bind_args[container], host_dir, guest_dir)
+
     if container == 'docker':
-        mount_option = '-v %s:%s' % (host_dir, guest_dir)
         # In the docker case we need to ensure the image has been pull on this
         # node, as the images are not shared across the nodes.
         commands.append('docker pull %s' % image_uri)
-    else:
-        mount_option = ''
 
-    commands.append('%s run %s %s -g %s -p %s -o %s -s %s' % (
-            container, mount_option, image_uri,
-            geometry_filename, parameters_filename,
-            output_filename, scratch_dir
+    container_args = '-g %s -p %s -o %s -s %s' % (
+        geometry_filename, parameters_filename,
+        output_filename, scratch_dir
+    )
+
+    if container != 'shifter':
+        commands.append('%s run %s %s' % (
+            container, mount_option, image_uri, container_args
         ))
+    # Shifters syntax is pretty different so special case it
+    else:
+        commands.append('shifter %s --image=%s --entrypoint -- %s'  % (
+            mount_option, image_uri, container_args
+        ))
+
+    if _nersc(cluster):
+        # NERSC specific options
+        job_parameters.update({
+            'numberOfNodes': 1,
+            'queue': 'debug',
+            'constraint': 'haswell',
+            'account': os.environ.get('OC_ACCOUNT')
+        })
 
     body = {
         # ensure there are no special characters in the submission script name
@@ -447,9 +483,7 @@ def _create_job(task, cluster, image, run_parameters, container_description, inp
         ],
         'output': output,
         'uploadOutput': False,
-        'params': {
-            'taskFlowId': task.taskflow.id
-        }
+        'params': job_parameters
     }
 
     client = create_girder_client(
