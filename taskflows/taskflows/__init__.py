@@ -106,6 +106,21 @@ def _get_oc_folder(client):
 
     return oc_folder
 
+def _countdown(cluster):
+    """
+    Returns the number of seconds the monitoring task should be delayed before
+    running based on the cluster we are using.
+    """
+    countdown = 0
+    # If we are running at NERSC our job states are cached for 60 seconds,
+    # so they are potentially 60 seconds out of date, so we have to wait
+    # at least 60 seconds before we can assume that the job is complete if its
+    # nolonger in the queue, so we delay our monitoring
+    if _nersc(cluster):
+        countdown = 65
+
+    return countdown
+
 @cumulus.taskflow.task
 def start(task, input_, user, cluster, image, run_parameters):
     """
@@ -153,6 +168,7 @@ def start(task, input_, user, cluster, image, run_parameters):
 
     monitor_job.apply_async((cluster, job), {'girder_token': task.taskflow.girder_token,
                                              'monitor_interval': 10},
+                                             countdown=_countdown(cluster),
                             link=postprocess_description.s(input_, user, cluster, image, run_parameters, root_folder, job, description_folder))
 
 def _get_job_parameters(task, cluster, image, run_parameters):
@@ -517,8 +533,11 @@ def submit_calculation(task, input_, cluster, image, run_parameters, root_folder
 
     submit_job(cluster, job, girder_token=girder_token, monitor=False)
 
+    task.taskflow.logger.info('Submitted job %s to cluster.' % job['_id'])
+
     monitor_job.apply_async((cluster, job), {'girder_token': girder_token,
                                              'monitor_interval': 10},
+                                             countdown=_countdown(cluster),
                             link=postprocess_job.s(input_, cluster, image, run_parameters, root_folder, container_description, input_folder, output_folder, scratch_folder, job))
 
 @cumulus.taskflow.task
