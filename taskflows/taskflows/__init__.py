@@ -67,7 +67,7 @@ class OpenChemistryTaskFlow(TaskFlow):
             cluster = model.filter(cluster, user, passphrase=False)
 
         super(OpenChemistryTaskFlow, self).start(
-            start.s(input_, cluster, image, run_parameters),
+            start.s(input_, user, cluster, image, run_parameters),
             *args, **kwargs)
 
 def _get_cori(client):
@@ -107,7 +107,7 @@ def _get_oc_folder(client):
     return oc_folder
 
 @cumulus.taskflow.task
-def start(task, input_, cluster, image, run_parameters):
+def start(task, input_, user, cluster, image, run_parameters):
     """
     The flow is the following:
     - Dry run the container with the -d flag to obtain a description of the input/output formats
@@ -153,9 +153,9 @@ def start(task, input_, cluster, image, run_parameters):
 
     monitor_job.apply_async((cluster, job), {'girder_token': task.taskflow.girder_token,
                                              'monitor_interval': 10},
-                            link=postprocess_description.s(input_, cluster, image, run_parameters, root_folder, job, description_folder))
+                            link=postprocess_description.s(input_, user, cluster, image, run_parameters, root_folder, job, description_folder))
 
-def _get_job_parameters(cluster, image, run_parameters):
+def _get_job_parameters(task, cluster, image, run_parameters):
     container = run_parameters.get('container', 'docker') # docker | singularity
     repository = image.get('repository')
     tag = image.get('tag')
@@ -240,7 +240,7 @@ def _create_description_job(task, cluster, description_folder, image, run_parame
     return job
 
 @cumulus.taskflow.task
-def postprocess_description(task, _, input_, cluster, image, run_parameters, root_folder, description_job, description_folder):
+def postprocess_description(task, _, input_, user, cluster, image, run_parameters, root_folder, description_job, description_folder):
     task.taskflow.logger.info('Processing description job output.')
 
     client = create_girder_client(
@@ -274,17 +274,25 @@ def postprocess_description(task, _, input_, cluster, image, run_parameters, roo
     if description_file is None:
         raise Exception('The container does not implement correctly the --description flag')
 
-    with tempfile.TemporaryFile() as tf:
-        client.downloadFile(pull_file['_id'], tf)
-        tf.seek(0)
-        container_pull = json.loads(tf.read().decode())
+    with client.session() as session:
+        # If we have a NEWT session id we need set as a cookie so the redirect
+        # to the NEWT API works ( is authenticated ).
+        newt_session_id = parse('newt.sessionId').find(user)
+        if newt_session_id:
+            newt_session_id = newt_session_id[0].value
+            session.cookies.set('newt_sessionid', newt_session_id)
 
-    image = container_pull
+        with tempfile.TemporaryFile() as tf:
+            client.downloadFile(pull_file['_id'], tf)
+            tf.seek(0)
+            container_pull = json.loads(tf.read().decode())
 
-    with tempfile.TemporaryFile() as tf:
-        client.downloadFile(description_file['_id'], tf)
-        tf.seek(0)
-        container_description = json.loads(tf.read().decode())
+        image = container_pull
+
+        with tempfile.TemporaryFile() as tf:
+            client.downloadFile(description_file['_id'], tf)
+            tf.seek(0)
+            container_description = json.loads(tf.read().decode())
 
     # Add code name and version to the taskflow metadata
     code = {
