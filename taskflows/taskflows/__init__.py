@@ -1,5 +1,6 @@
 import cumulus
 from cumulus.taskflow import TaskFlow
+from cumulus.taskflow import logging
 from cumulus.taskflow.cluster import create_girder_client
 from cumulus.tasks.job import (download_job_input_folders,
                                upload_job_output_to_folder)
@@ -17,6 +18,8 @@ import tempfile
 import re
 
 from .utils import cjson_to_xyz
+
+STATUS_LEVEL = logging.INFO + 5
 
 class OpenChemistryTaskFlow(TaskFlow):
     """
@@ -581,4 +584,4 @@ def postprocess_job(task, _, input_, cluster, image, run_parameters, root_folder
 
     client.put('calculations/%s' % input_['calculation']['_id'], parameters=params, json=body)
 
-    task.taskflow.logger.log(25, 'Done!')
+    task.taskflow.logger.log(STATUS_LEVEL, 'Done!')
