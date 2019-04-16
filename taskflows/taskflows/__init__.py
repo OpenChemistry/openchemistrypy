@@ -123,9 +123,7 @@ def start(task, input_, cluster, image, run_parameters):
         cluster = _get_cori(client)
 
     if '_id' not in cluster:
-        msg = 'Invalid cluster configurations: %s' % cluster
-        _log_error(task, msg)
-        raise Exception(msg)
+        _log_and_raise(task, 'Invalid cluster configurations: %s' % cluster)
 
     oc_folder = _get_oc_folder(client)
     root_folder = client.createFolder(oc_folder['_id'],
@@ -262,31 +260,23 @@ def postprocess_description(task, _, input_, cluster, image, run_parameters, roo
             files = list(client.listFile(item['_id']))
             if len(files) != 1:
                 _log_std_err(task, client, description_folder)
-                msg = 'Expecting a single file under item, found: %s' % len(files)
-                _log_error(task, msg)
-                raise Exception(msg)
+                _log_and_raise(task, 'Expecting a single file under item, found: %s' % len(files))
             description_file = files[0]
 
         elif item['name'] == 'pull.json':
             files = list(client.listFile(item['_id']))
             if len(files) != 1:
                 _log_std_err(task, client, description_folder)
-                msg = 'Expecting a single file under item, found: %s' % len(files)
-                _log_error(task, msg)
-                raise Exception(msg)
+                _log_and_raise(task, 'Expecting a single file under item, found: %s' % len(files))
             pull_file = files[0]
 
     if pull_file is None:
         _log_std_err(task, client, description_folder)
-        msg = 'There was an error trying to pull the requested container image'
-        _log_error(task, msg)
-        raise Exception(msg)
+        _log_and_raise(task, 'There was an error trying to pull the requested container image')
 
     if description_file is None:
         _log_std_err(task, client, description_folder)
-        msg = 'The container does not implement correctly the --description flag'
-        _log_error(task, msg)
-        raise Exception(msg)
+        _log_and_raise(task, 'The container does not implement correctly the --description flag')
 
     with tempfile.TemporaryFile() as tf:
         client.downloadFile(pull_file['_id'], tf)
@@ -323,15 +313,11 @@ def setup_input(task, input_, cluster, image, run_parameters, root_folder, conta
         cluster = _get_cori(client)
 
     if '_id' not in cluster:
-        msg = 'Invalid cluster configurations: %s' % cluster
-        _log_error(task, msg)
-        raise Exception(msg)
+        _log_and_raise(task, 'Invalid cluster configurations: %s' % cluster)
 
     calculation_id = parse('calculation._id').find(input_)
     if not calculation_id:
-        msg = 'Unable to extract calculation id.'
-        _log_error(task, msg)
-        raise Exception(msg)
+        _log_and_raise(task, 'Unable to extract calculation id.')
 
     calculation_id = calculation_id[0].value
     calculation = client.get('calculations/%s' % calculation_id)
@@ -389,9 +375,7 @@ def _convert_geometry(task, cjson, input_format):
     elif input_format.lower() == 'cjson':
         return json.dumps(cjson)
     else:
-        msg = 'The container is requesting an unsupported geometry format %s' % input_format
-        _log_error(task, msg)
-        raise Exception(msg)
+        _log_and_raise(task, 'The container is requesting an unsupported geometry format %s' % input_format)
 
 def _create_job(task, cluster, image, run_parameters, container_description, input_folder, output_folder, scratch_folder, run_folder):
     params = _get_job_parameters(cluster, image, run_parameters)
@@ -489,8 +473,12 @@ def _nersc(cluster):
 def _demo(cluster):
     return cluster.get('name') == 'demo_cluster'
 
+def _log_and_raise(task, msg):
+    _log_error(task, msg)
+    raise Exception(msg)
+
 def _log_error(task, msg):
-    task.taskflow.logger.info('ERROR: %s' % msg)
+    task.taskflow.logger.error(msg)
 
 def _log_std_err(task, client, run_folder):
     errors = _get_std_err(client, run_folder)
@@ -564,18 +552,14 @@ def postprocess_job(task, _, input_, cluster, image, run_parameters, root_folder
             files = list(client.listFile(item['_id']))
             if len(files) != 1:
                 _log_std_err(task, client, run_folder)
-                msg = 'Expecting a single file under item, found: %s' % len(files)
-                _log_error(task, msg)
-                raise Exception(msg)
+                _log_and_raise(task, 'Expecting a single file under item, found: %s' % len(files))
             output_file = files[0]
             break
 
     if output_file is None:
         # Log the job stderr
         _log_std_err(task, client, run_folder)
-        msg = 'The calculation did not produce any output file.'
-        _log_error(task, msg)
-        raise Exception(msg)
+        _log_and_raise(task, 'The calculation did not produce any output file.')
 
     # remove the run folder, only useful to access the stdout and stderr after the job is done
     client.delete('folder/%s' % run_folder['_id'])
@@ -597,4 +581,4 @@ def postprocess_job(task, _, input_, cluster, image, run_parameters, root_folder
 
     client.put('calculations/%s' % input_['calculation']['_id'], parameters=params, json=body)
 
-    task.taskflow.logger.info('Done!')
+    task.taskflow.logger.log(25, 'Done!')
