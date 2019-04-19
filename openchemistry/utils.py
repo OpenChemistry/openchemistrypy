@@ -9,6 +9,17 @@ import avogadro
 from jsonpath_rw import parse
 from IPython.lib import kernel
 
+def fetch_or_create_queue(girder_client):
+    params = {'name': 'oc_queue'}
+    queue = girder_client.get('queues', parameters=params)
+
+    if (len(queue) > 0):
+        queue = queue[0]
+    else:
+        params = {'name': 'oc_queue', 'maxRunning': 5}
+        queue = girder_client.post('queues', parameters=params)
+
+    return queue
 
 def lookup_file(girder_client, jupyterhub_url):
     """
@@ -110,3 +121,15 @@ def camel_to_space(s):
         )           # end the group""",
     r' \1', s, flags=re.VERBOSE)
     return s[0:1].upper() + s[1:]
+
+def parse_image_name(image_name):
+    split = image_name.split(":")
+    if len(split) > 2:
+        raise ValueError('Invalid Docker image name provided')
+    elif len(split) == 1:
+        repository = split[0]
+        tag = 'latest'
+    else:
+        repository, tag = split
+
+    return repository, tag
