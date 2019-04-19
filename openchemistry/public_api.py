@@ -5,7 +5,7 @@ import avogadro
 
 from .girder import GirderClient
 from .molecule import Molecule
-from .calculation import GirderMolecule, CalculationResult, AttributeInterceptor
+from .calculation import GirderMolecule, CalculationResult, AttributeInterceptor, _fetch_calculation
 from .data_provider import CjsonProvider, AvogadroProvider
 from .utils import fetch_or_create_queue
 
@@ -15,17 +15,59 @@ def _is_inchi_key(identifier):
     return len(identifier) == 27 and identifier[25] == '-' and \
         _inchi_key_regex.match(identifier)
 
-def _find_using_cactus(identifier):
+def _find_molecule(identifier=None, inchi=None, smiles=None):
+    if inchi:
+        return _find_molecule_by_inchi(inchi)
+
+    if smiles:
+        return _find_molecule_by_smiles(smiles)
+
+    # InChiKey?
+    if _is_inchi_key(identifier):
+        return _find_molecule_by_inchikey(identifier)
+
+    # Finally, if identifier is something else (a name), try cactus
+    if identifier:
+        return _find_molecule_using_cactus(identifier)
+
+    return None
+
+def _find_molecule_by_inchi(inchi):
+    params = {
+        'inchi': inchi
+    }
+    return _find_molecule_using_girder(params)
+
+def _find_molecule_by_smiles(smiles):
+    params = {
+        'smiles': smiles
+    }
+    return _find_molecule_using_girder(params)
+
+def _find_molecule_by_inchikey(inchikey):
+    try:
+        return GirderClient().get('molecules/inchikey/%s' % inchikey)
+    except HttpError as ex:
+        if ex.status == 404:
+            return _find_molecule_using_cactus(inchikey)
+        else:
+            raise
+
+def _find_molecule_using_cactus(identifier):
     params = {
         'cactus': identifier
-
     }
-    molecule = GirderClient().get('molecules/search', parameters=params)
-
+    molecules = GirderClient().get('molecules/search', parameters=params)
     # Just pick the first
-    if len(molecule) > 0:
-        molecule = molecule[0]
-        return GirderMolecule(molecule['_id'], molecule['cjson'])
+    if len(molecules) > 0:
+        return molecules[0]
+    else:
+        return None
+
+def _find_molecule_using_girder(params):
+    molecules = GirderClient().get('molecules', parameters=params)
+    if len(molecules) > 0:
+        return molecules[0]
     else:
         return None
 
@@ -44,7 +86,6 @@ def _calculation_monitor(taskflow_ids):
     return table
 
 def import_structure(smiles=None, inchi=None, cjson=None):
-
     # If the smiles begins with 'InChI=', then it is actually an inchi instead
     if smiles and smiles.startswith('InChI='):
         inchi = smiles
@@ -67,80 +108,29 @@ def import_structure(smiles=None, inchi=None, cjson=None):
 
     return GirderMolecule(molecule['_id'], molecule['cjson'])
 
-def find_structure_by_inchi_or_smiles(inchi=None, smiles=None):
-    params = {}
-    if inchi:
-        params['inchi'] = inchi
-    elif smiles:
-        params['smiles'] = smiles
+def find_molecule(identifier=None, inchi=None, smiles=None):
+    molecule = _find_molecule(identifier, inchi, smiles)
+    if molecule is None:
+        raise Exception('Unable to find a molecule with the provided identifiers.')
+    return GirderMolecule(molecule['_id'], molecule.get('cjson'))
 
-    if not params:
-       raise Exception('Either inchi or smiles must be set')
-
-    molecules = GirderClient().get('molecules', parameters=params)
-
-    if not molecules:
-        raise Exception('No molecules found with parameters:', params)
-
-     # This will return a list of molecules. Only keep the first one.
-    return molecules[0]
-
-
-def _get_molecule_or_calculation_result(molecule, image_name, input_parameters, input_geometry):
-    is_calc_query = (image_name is not None and input_parameters is not None)
-
-    # Are we searching for a specific calculation?
-    if is_calc_query:
-        # Look for optimization calculation
-        cal = _fetch_calculation(molecule['_id'], image_name, input_parameters, input_geometry)
-
-        if cal is not None:
-            # TODO We should probably pass in the full calculation
-            # so we don't have to fetch it again.
-            return CalculationResult(cal['_id'])
-        else:
-            return None
-    else:
-        # If this was found by InChI or SMILES, it may not have cjson,
-        # but GirderMolecule() will get the cjson via another rest call.
-        return GirderMolecule(molecule['_id'], molecule.get('cjson'))
-
+def find_calculation(molecule, image_name=None, input_parameters=None, input_geometry=None):
+    calculation = _fetch_calculation(molecule._id, image_name, input_parameters, input_geometry)
+    if calculation is None:
+        raise Exception('Unable to find a matching calculation in the database')
+    return CalculationResult(calculation['_id'])
 
 def find_structure(identifier=None, image_name=None, input_parameters=None, input_geometry=None, inchi=None, smiles=None):
+    molecule = find_molecule(identifier, inchi, smiles)
 
-    if inchi or smiles:
-        molecule = find_structure_by_inchi_or_smiles(inchi, smiles)
-        return _get_molecule_or_calculation_result(molecule, image_name, input_parameters, input_geometry)
-
-    if not identifier:
-        raise Exception('identifier, inchi, or smiles must be set')
-
-    # InChiKey?
-    if _is_inchi_key(identifier):
-        try:
-            molecule = GirderClient().get('molecules/inchikey/%s' % identifier)
-            return _get_molecule_or_calculation_result(molecule, image_name, input_parameters, input_geometry)
-
-        except HttpError as ex:
-            if ex.status == 404:
-                # Use cactus after this code block to lookup the structure
-                pass
-            else:
-                raise
-
-    # If we have been provided basis, theory or functional and we haven't found
-    # a calculation, then we are done.
+    # If we have been provided basis, theory or functional it means the user is
+    # looking for a calculation, otherwise they're looking for a molecule
     is_calc_query = (image_name is not None and input_parameters is not None)
+
     if is_calc_query:
-        return None
-
-    # Try cactus
-    molecule = _find_using_cactus(identifier)
-
-    if not molecule:
-        raise Exception('No molecules found matching identifier: \'%s\'' % identifier)
-
-    return molecule
+        return find_calculation(molecule, image_name, input_parameters, input_geometry)
+    else:
+        return molecule
 
 def load(data):
     if isinstance(data, dict):
