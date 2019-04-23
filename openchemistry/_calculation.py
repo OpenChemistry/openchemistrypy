@@ -2,10 +2,10 @@ import os
 import inspect
 from jsonpath_rw import parse
 
-from .girder import GirderClient
-from .molecule import Molecule
-from .data_provider import MoleculeProvider, CalculationProvider
-from .utils import fetch_or_create_queue, hash_object, parse_image_name
+from ._girder import GirderClient
+from ._molecule import Molecule
+from ._data import MoleculeProvider, CalculationProvider
+from ._utils import fetch_or_create_queue, hash_object, parse_image_name
 
 class GirderMolecule(Molecule):
     '''
@@ -108,7 +108,7 @@ class AttributeInterceptor(object):
 class PendingCalculationResultWrapper(AttributeInterceptor):
     def __init__(self, calculation, taskflow_id=None):
         try:
-            from .notebook import CalculationMonitor
+            from ._notebook import CalculationMonitor
             if taskflow_id is None:
                 taskflow_id = calculation._properties['taskFlowId']
 

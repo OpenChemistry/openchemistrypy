@@ -1,4 +1,4 @@
-from .visualization import Structure, Orbitals, Properties, Vibrations
+from ._visualization import Structure, Orbitals, Properties, Vibrations
 
 class Molecule(object):
     def __init__(self, provider):

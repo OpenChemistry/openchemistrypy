@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 import urllib.parse
 
-from .utils import hash_object, camel_to_space
+from ._utils import hash_object, camel_to_space
 
 class Visualization(ABC):
     def __init__(self, provider):
@@ -23,7 +23,7 @@ class Visualization(ABC):
             **self._transfer_function_to_params(transfer_function)
         }
         try:
-            from .notebook import CJSON
+            from ._notebook import CJSON
             return CJSON(self._provider.cjson, **self._params)
         except ImportError:
             # Outside notebook print CJSON

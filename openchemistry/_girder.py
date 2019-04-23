@@ -1,7 +1,7 @@
 import os
 from girder_client import GirderClient as GC
 
-from .utils import lookup_file
+from ._utils import lookup_file
 
 class GirderClient(object):
 

@@ -3,11 +3,11 @@ from girder_client import HttpError
 import re
 import avogadro
 
-from .girder import GirderClient
-from .molecule import Molecule
-from .calculation import GirderMolecule, CalculationResult, AttributeInterceptor, _fetch_calculation
-from .data_provider import CjsonProvider, AvogadroProvider
-from .utils import fetch_or_create_queue
+from ._girder import GirderClient
+from ._molecule import Molecule
+from ._calculation import GirderMolecule, CalculationResult, AttributeInterceptor, _fetch_calculation
+from ._data import CjsonProvider, AvogadroProvider
+from ._utils import fetch_or_create_queue
 
 _inchi_key_regex = re.compile("^([0-9A-Z\-]+)$")
 
@@ -73,7 +73,7 @@ def _find_molecule_using_girder(params):
 
 def _calculation_monitor(taskflow_ids):
     try:
-        from .notebook import CalculationMonitor
+        from ._notebook import CalculationMonitor
         table = CalculationMonitor({
             'taskFlowIds': taskflow_ids,
             'girderToken': GirderClient().token,

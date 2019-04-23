@@ -3,8 +3,8 @@ import json
 import collections
 import avogadro
 
-from .girder import GirderClient
-from .utils import calculate_mo
+from ._girder import GirderClient
+from ._utils import calculate_mo
 
 class DataProvider(ABC):
     @property
