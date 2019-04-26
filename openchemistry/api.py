@@ -190,12 +190,23 @@ def find_spectra(identifier, stype='IR', source='NIST'):
     """
     source = source.lower()
 
+    if _is_inchi_key(identifier) is False:
+        molecules = GirderClient().get('molecules')
+        for molecule in molecules:
+            if identifier == molecule['_id']:
+                identifier = molecule['inchikey']
+                break
+
     params = {
             'inchi' : identifier,
             'spectrum_type' : stype,
             'source' : source
     }
 
-    spectra = GirderClient().get('experiments', parameters=params)
+    spectrum = GirderClient().get('experiments', parameters=params)
+    wavenumbers = [float(w) for w in spectrum['x'][1:-1].split()]
+    intensities = [float(i) for i in spectrum['y'][1:-1].split()]
+    max_intensity = max(intensities)
+    intensities = [i / max_intensity for i in intensities]
 
-    return spectra
+    return intensities, wavenumbers

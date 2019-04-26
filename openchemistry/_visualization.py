@@ -99,8 +99,17 @@ class Structure(Visualization):
 
 class Vibrations(Visualization):
 
-    def show(self, viewer='moljs', spectrum=True, menu=True, mode=-1, play=True, **kwargs):
-        return super(Vibrations, self).show(viewer=viewer, spectrum=spectrum, menu=menu, mode=mode, play=play, **kwargs)
+    def show(self, viewer='moljs', spectrum=True, menu=True, mode=-1,
+             play=True, experimental=False, **kwargs):
+
+        if experimental:
+            from .api import find_spectra
+            identifier = self._provider._molecule_id
+            wavenumbers, intensities = find_spectra(identifier, stype='IR',
+                                                    source='NIST')
+
+        return super(Vibrations, self).show(viewer=viewer, spectrum=spectrum,
+                menu=menu, mode=mode, play=play, **kwargs)
 
     def data(self):
         return self._provider.vibrations
