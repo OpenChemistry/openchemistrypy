@@ -70,7 +70,7 @@ class OpenChemistryTaskFlow(TaskFlow):
             cluster = model.filter(cluster, user, passphrase=False)
 
         super(OpenChemistryTaskFlow, self).start(
-            start.s(input_, cluster, image, run_parameters),
+            start.s(input_, user, cluster, image, run_parameters),
             *args, **kwargs)
 
 def _get_cori(client):
@@ -109,8 +109,23 @@ def _get_oc_folder(client):
 
     return oc_folder
 
+def _countdown(cluster):
+    """
+    Returns the number of seconds the monitoring task should be delayed before
+    running based on the cluster we are using.
+    """
+    countdown = 0
+    # If we are running at NERSC our job states are cached for 60 seconds,
+    # so they are potentially 60 seconds out of date, so we have to wait
+    # at least 60 seconds before we can assume that the job is complete if its
+    # nolonger in the queue, so we delay our monitoring
+    if _nersc(cluster):
+        countdown = 65
+
+    return countdown
+
 @cumulus.taskflow.task
-def start(task, input_, cluster, image, run_parameters):
+def start(task, input_, user, cluster, image, run_parameters):
     """
     The flow is the following:
     - Dry run the container with the -d flag to obtain a description of the input/output formats
@@ -156,9 +171,10 @@ def start(task, input_, cluster, image, run_parameters):
 
     monitor_job.apply_async((cluster, job), {'girder_token': task.taskflow.girder_token,
                                              'monitor_interval': 10},
-                            link=postprocess_description.s(input_, cluster, image, run_parameters, root_folder, job, description_folder))
+                                             countdown=_countdown(cluster),
+                            link=postprocess_description.s(input_, user, cluster, image, run_parameters, root_folder, job, description_folder))
 
-def _get_job_parameters(cluster, image, run_parameters):
+def _get_job_parameters(task, cluster, image, run_parameters):
     container = run_parameters.get('container', 'docker') # docker | singularity
     repository = image.get('repository')
     tag = image.get('tag')
@@ -168,13 +184,21 @@ def _get_job_parameters(cluster, image, run_parameters):
     guest_dir = '/data' # the directory inside the container pointing to host_dir
     job_dir = '' # relative path from guest_dir to the job directory
     setup_commands = []
+    job_parameters = {
+        'taskFlowId': task.taskflow.id
+    }
 
     # Override default parameters depending on the cluster we are running on
 
     if _nersc(cluster):
         # NERSC specific options
-        container = 'singularity' # no root access, only singularity is supported
-        raise NotImplementedError('Cannot run on NERSC yet')
+        container = 'shifter' # no root access, only singularity is supported
+        job_parameters.update({
+            'numberOfNodes': 1,
+            'queue': 'debug',
+            'constraint': 'haswell',
+            'account': os.environ.get('OC_ACCOUNT')
+        })
     elif _demo(cluster):
         # DEV/DEMO environment options
         host_dir = 'dev_job_data'
@@ -193,25 +217,28 @@ def _get_job_parameters(cluster, image, run_parameters):
         'hostDir': host_dir,
         'guestDir': guest_dir,
         'jobDir': job_dir,
-        'setupCommands': setup_commands
+        'setupCommands': setup_commands,
+        'jobParameters': job_parameters
     }
 
 def _create_description_job(task, cluster, description_folder, image, run_parameters):
-    params = _get_job_parameters(cluster, image, run_parameters)
+    params = _get_job_parameters(task, cluster, image, run_parameters)
     container = params['container']
     setup_commands = params['setupCommands']
     repository = params['repository']
     tag = params['tag']
-
-    job_params = {
-        'taskFlowId': task.taskflow.id
-    }
+    job_parameters = params['jobParameters'];
 
     output_file = 'description.json'
 
+    run_command = '%s run $IMAGE_NAME' % container
+    # Shifter has a pretty different sytax so special case it.
+    if container == 'shifter':
+        run_command = 'shifter --image=$IMAGE_NAME --entrypoint --'
+
     commands = setup_commands + [
         'IMAGE_NAME=$(python pull.py -r %s -t %s -c %s | tail -1)' % (repository, tag, container),
-        '%s run $IMAGE_NAME -d > %s' % (container, output_file),
+        '%s -d > %s' % (run_command, output_file),
         'rm pull.py'
     ]
 
@@ -232,7 +259,7 @@ def _create_description_job(task, cluster, description_folder, image, run_parame
             }
         ],
         'uploadOutput': False,
-        'params': job_params
+        'params': job_parameters
     }
 
     client = create_girder_client(
@@ -243,7 +270,7 @@ def _create_description_job(task, cluster, description_folder, image, run_parame
     return job
 
 @cumulus.taskflow.task
-def postprocess_description(task, _, input_, cluster, image, run_parameters, root_folder, description_job, description_folder):
+def postprocess_description(task, _, input_, user, cluster, image, run_parameters, root_folder, description_job, description_folder):
     task.taskflow.logger.info('Processing the output of the container description job.')
 
     client = create_girder_client(
@@ -281,17 +308,25 @@ def postprocess_description(task, _, input_, cluster, image, run_parameters, roo
         _log_std_err(task, client, description_folder)
         _log_and_raise(task, 'The container does not implement correctly the --description flag')
 
-    with tempfile.TemporaryFile() as tf:
-        client.downloadFile(pull_file['_id'], tf)
-        tf.seek(0)
-        container_pull = json.loads(tf.read().decode())
+    with client.session() as session:
+        # If we have a NEWT session id we need set as a cookie so the redirect
+        # to the NEWT API works ( is authenticated ).
+        newt_session_id = parse('newt.sessionId').find(user)
+        if newt_session_id:
+            newt_session_id = newt_session_id[0].value
+            session.cookies.set('newt_sessionid', newt_session_id)
 
-    image = container_pull
+        with tempfile.TemporaryFile() as tf:
+            client.downloadFile(pull_file['_id'], tf)
+            tf.seek(0)
+            container_pull = json.loads(tf.read().decode())
 
-    with tempfile.TemporaryFile() as tf:
-        client.downloadFile(description_file['_id'], tf)
-        tf.seek(0)
-        container_description = json.loads(tf.read().decode())
+        image = container_pull
+
+        with tempfile.TemporaryFile() as tf:
+            client.downloadFile(description_file['_id'], tf)
+            tf.seek(0)
+            container_description = json.loads(tf.read().decode())
 
     # Add code name and version to the taskflow metadata
     code = {
@@ -389,6 +424,7 @@ def _create_job(task, cluster, image, run_parameters, container_description, inp
     host_dir = params['hostDir']
     guest_dir = params['guestDir']
     job_dir = params['jobDir']
+    job_parameters = params['jobParameters'];
 
     task.taskflow.logger.info('Creating %s job' % repository)
 
@@ -431,19 +467,43 @@ def _create_job(task, cluster, image, run_parameters, container_description, inp
         'mkdir scratch'
     ]
 
+    # Each contain has a different bind arg
+    bind_args = {
+        'docker': '-v',
+        'singularity': '-B',
+        'shifter': '-V'
+    }
+
+    mount_option = '%s %s:%s' % (bind_args[container], host_dir, guest_dir)
+
     if container == 'docker':
-        mount_option = '-v %s:%s' % (host_dir, guest_dir)
         # In the docker case we need to ensure the image has been pull on this
         # node, as the images are not shared across the nodes.
         commands.append('docker pull %s' % image_uri)
-    else:
-        mount_option = ''
 
-    commands.append('%s run %s %s -g %s -p %s -o %s -s %s' % (
-            container, mount_option, image_uri,
-            geometry_filename, parameters_filename,
-            output_filename, scratch_dir
+    container_args = '-g %s -p %s -o %s -s %s' % (
+        geometry_filename, parameters_filename,
+        output_filename, scratch_dir
+    )
+
+    if container != 'shifter':
+        commands.append('%s run %s %s' % (
+            container, mount_option, image_uri, container_args
         ))
+    # Shifters syntax is pretty different so special case it
+    else:
+        commands.append('shifter %s --image=%s --entrypoint -- %s'  % (
+            mount_option, image_uri, container_args
+        ))
+
+    if _nersc(cluster):
+        # NERSC specific options
+        job_parameters.update({
+            'numberOfNodes': 1,
+            'queue': 'debug',
+            'constraint': 'haswell',
+            'account': os.environ.get('OC_ACCOUNT')
+        })
 
     body = {
         # ensure there are no special characters in the submission script name
@@ -457,9 +517,7 @@ def _create_job(task, cluster, image, run_parameters, container_description, inp
         ],
         'output': output,
         'uploadOutput': False,
-        'params': {
-            'taskFlowId': task.taskflow.id
-        }
+        'params': job_parameters
     }
 
     client = create_girder_client(
@@ -520,8 +578,11 @@ def submit_calculation(task, input_, cluster, image, run_parameters, root_folder
 
     submit_job(cluster, job, girder_token=girder_token, monitor=False)
 
+    task.taskflow.logger.info('Submitted job %s to cluster.' % job['_id'])
+
     monitor_job.apply_async((cluster, job), {'girder_token': girder_token,
                                              'monitor_interval': 10},
+                                             countdown=_countdown(cluster),
                             link=postprocess_job.s(input_, cluster, image, run_parameters, root_folder, container_description, input_folder, output_folder, scratch_folder, run_folder, job))
 
 @cumulus.taskflow.task
