@@ -416,7 +416,7 @@ def _convert_geometry(task, cjson, input_format):
         _log_and_raise(task, 'The container is requesting an unsupported geometry format %s' % input_format)
 
 def _create_job(task, cluster, image, run_parameters, container_description, input_folder, output_folder, scratch_folder, run_folder):
-    params = _get_job_parameters(cluster, image, run_parameters)
+    params = _get_job_parameters(task, cluster, image, run_parameters)
     container = params['container']
     image_uri = params['imageUri']
     repository = params['repository']
