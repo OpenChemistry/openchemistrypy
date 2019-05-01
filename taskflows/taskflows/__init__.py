@@ -487,7 +487,7 @@ def _create_job(task, cluster, image, run_parameters, container_description, inp
     )
 
     if container != 'shifter':
-        commands.append('%s run %s %s' % (
+        commands.append('%s run %s %s %s' % (
             container, mount_option, image_uri, container_args
         ))
     # Shifters syntax is pretty different so special case it
