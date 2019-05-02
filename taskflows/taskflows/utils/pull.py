@@ -44,6 +44,12 @@ def docker(repo, digest):
 
     return image_name
 
+def shifter(repo, tag):
+    image_name = '%s:%s' % (repo, tag)
+    subprocess.check_call(['shifterimg', 'pull', image_name])
+
+    return image_name
+
 def write_descriptor(repo, tag, digest, image_uri):
     des = {
         'repository': repo,
@@ -72,7 +78,7 @@ def main():
     parser = argparse.ArgumentParser(description='Pull image from container registry.')
     parser.add_argument('-r', '--repository', type=str, help='the repository to pull from', required=True)
     parser.add_argument('-t', '--tag', type=str, help='the tag to pull', required=True)
-    parser.add_argument('-c', '--container', choices=['docker', 'singularity'],
+    parser.add_argument('-c', '--container', choices=['docker', 'singularity', 'shifter'],
                         help='the type of container', required=True)
 
     args = parser.parse_args()
@@ -85,6 +91,8 @@ def main():
 
     if container == 'singularity':
         image_uri = singularity(repo, digest)
+    elif container == 'shifter':
+        image_uri = shifter(repo, tag)
     else:
         image_uri = docker(repo, digest)
 
