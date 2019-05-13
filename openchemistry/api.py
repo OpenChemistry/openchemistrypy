@@ -57,10 +57,10 @@ def _find_molecule_using_cactus(identifier):
     params = {
         'cactus': identifier
     }
-    molecules = GirderClient().get('molecules/search', parameters=params)
+    res = GirderClient().get('molecules/search', parameters=params)
     # Just pick the first
-    if len(molecules) > 0:
-        return molecules[0]
+    if 'results' in res and len(res['results']) > 0:
+        return res['results'][0]
     else:
         return None
 
