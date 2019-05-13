@@ -1,5 +1,6 @@
 import cumulus
 from cumulus.taskflow import TaskFlow
+from cumulus.taskflow import logging
 from cumulus.taskflow.cluster import create_girder_client
 from cumulus.tasks.job import (download_job_input_folders,
                                upload_job_output_to_folder)
@@ -15,6 +16,8 @@ import datetime
 import json
 import tempfile
 import re
+
+STATUS_LEVEL = logging.INFO + 5
 
 class OpenChemistryTaskFlow(TaskFlow):
     """
@@ -65,7 +68,7 @@ class OpenChemistryTaskFlow(TaskFlow):
             cluster = model.filter(cluster, user, passphrase=False)
 
         super(OpenChemistryTaskFlow, self).start(
-            start.s(input_, cluster, image, run_parameters),
+            start.s(input_, user, cluster, image, run_parameters),
             *args, **kwargs)
 
 def _get_cori(client):
@@ -104,8 +107,23 @@ def _get_oc_folder(client):
 
     return oc_folder
 
+def _countdown(cluster):
+    """
+    Returns the number of seconds the monitoring task should be delayed before
+    running based on the cluster we are using.
+    """
+    countdown = 0
+    # If we are running at NERSC our job states are cached for 60 seconds,
+    # so they are potentially 60 seconds out of date, so we have to wait
+    # at least 60 seconds before we can assume that the job is complete if its
+    # nolonger in the queue, so we delay our monitoring
+    if _nersc(cluster):
+        countdown = 65
+
+    return countdown
+
 @cumulus.taskflow.task
-def start(task, input_, cluster, image, run_parameters):
+def start(task, input_, user, cluster, image, run_parameters):
     """
     The flow is the following:
     - Dry run the container with the -d flag to obtain a description of the input/output formats
@@ -121,7 +139,7 @@ def start(task, input_, cluster, image, run_parameters):
         cluster = _get_cori(client)
 
     if '_id' not in cluster:
-        raise Exception('Invalid cluster configurations: %s' % cluster)
+        _log_and_raise(task, 'Invalid cluster configurations: %s' % cluster)
 
     oc_folder = _get_oc_folder(client)
     root_folder = client.createFolder(oc_folder['_id'],
@@ -142,18 +160,19 @@ def start(task, input_, cluster, image, run_parameters):
     job = _create_description_job(task, cluster, description_folder, image, run_parameters)
 
     # Now download pull.py script to the cluster
-    task.taskflow.logger.info('Downloading description input files to cluster.')
+    task.taskflow.logger.info('Preparing job to obtain the container description.')
     download_job_input_folders(cluster, job,
                                girder_token=task.taskflow.girder_token, submit=False)
-    task.taskflow.logger.info('Downloading complete.')
+    task.taskflow.logger.info('Submitting job to obtain the container description.')
 
     submit_job(cluster, job, girder_token=task.taskflow.girder_token, monitor=False)
 
     monitor_job.apply_async((cluster, job), {'girder_token': task.taskflow.girder_token,
                                              'monitor_interval': 10},
-                            link=postprocess_description.s(input_, cluster, image, run_parameters, root_folder, job, description_folder))
+                                             countdown=_countdown(cluster),
+                            link=postprocess_description.s(input_, user, cluster, image, run_parameters, root_folder, job, description_folder))
 
-def _get_job_parameters(cluster, image, run_parameters):
+def _get_job_parameters(task, cluster, image, run_parameters):
     container = run_parameters.get('container', 'docker') # docker | singularity
     repository = image.get('repository')
     tag = image.get('tag')
@@ -163,13 +182,21 @@ def _get_job_parameters(cluster, image, run_parameters):
     guest_dir = '/data' # the directory inside the container pointing to host_dir
     job_dir = '' # relative path from guest_dir to the job directory
     setup_commands = []
+    job_parameters = {
+        'taskFlowId': task.taskflow.id
+    }
 
     # Override default parameters depending on the cluster we are running on
 
     if _nersc(cluster):
         # NERSC specific options
-        container = 'singularity' # no root access, only singularity is supported
-        raise NotImplementedError('Cannot run on NERSC yet')
+        container = 'shifter' # no root access, only singularity is supported
+        job_parameters.update({
+            'numberOfNodes': 1,
+            'queue': 'debug',
+            'constraint': 'haswell',
+            'account': os.environ.get('OC_ACCOUNT')
+        })
     elif _demo(cluster):
         # DEV/DEMO environment options
         host_dir = 'dev_job_data'
@@ -188,25 +215,28 @@ def _get_job_parameters(cluster, image, run_parameters):
         'hostDir': host_dir,
         'guestDir': guest_dir,
         'jobDir': job_dir,
-        'setupCommands': setup_commands
+        'setupCommands': setup_commands,
+        'jobParameters': job_parameters
     }
 
 def _create_description_job(task, cluster, description_folder, image, run_parameters):
-    params = _get_job_parameters(cluster, image, run_parameters)
+    params = _get_job_parameters(task, cluster, image, run_parameters)
     container = params['container']
     setup_commands = params['setupCommands']
     repository = params['repository']
     tag = params['tag']
-
-    job_params = {
-        'taskFlowId': task.taskflow.id
-    }
+    job_parameters = params['jobParameters'];
 
     output_file = 'description.json'
 
+    run_command = '%s run $IMAGE_NAME' % container
+    # Shifter has a pretty different sytax so special case it.
+    if container == 'shifter':
+        run_command = 'shifter --image=$IMAGE_NAME --entrypoint --'
+
     commands = setup_commands + [
         'IMAGE_NAME=$(python pull.py -r %s -t %s -c %s | tail -1)' % (repository, tag, container),
-        '%s run $IMAGE_NAME -d > %s' % (container, output_file),
+        '%s -d > %s' % (run_command, output_file),
         'rm pull.py'
     ]
 
@@ -227,7 +257,7 @@ def _create_description_job(task, cluster, description_folder, image, run_parame
             }
         ],
         'uploadOutput': False,
-        'params': job_params
+        'params': job_parameters
     }
 
     client = create_girder_client(
@@ -238,8 +268,8 @@ def _create_description_job(task, cluster, description_folder, image, run_parame
     return job
 
 @cumulus.taskflow.task
-def postprocess_description(task, _, input_, cluster, image, run_parameters, root_folder, description_job, description_folder):
-    task.taskflow.logger.info('Processing description job output.')
+def postprocess_description(task, _, input_, user, cluster, image, run_parameters, root_folder, description_job, description_folder):
+    task.taskflow.logger.info('Processing the output of the container description job.')
 
     client = create_girder_client(
         task.taskflow.girder_api_url, task.taskflow.girder_token)
@@ -257,32 +287,44 @@ def postprocess_description(task, _, input_, cluster, image, run_parameters, roo
         if item['name'] == 'description.json':
             files = list(client.listFile(item['_id']))
             if len(files) != 1:
-                raise Exception('Expecting a single file under item, found: %s' + len(files))
+                _log_std_err(task, client, description_folder)
+                _log_and_raise(task, 'Expecting a single file under item, found: %s' % len(files))
             description_file = files[0]
 
         elif item['name'] == 'pull.json':
             files = list(client.listFile(item['_id']))
             if len(files) != 1:
-                raise Exception('Expecting a single file under item, found: %s' + len(files))
+                _log_std_err(task, client, description_folder)
+                _log_and_raise(task, 'Expecting a single file under item, found: %s' % len(files))
             pull_file = files[0]
 
     if pull_file is None:
-        raise Exception('There was an error trying to pull the requested container image')
+        _log_std_err(task, client, description_folder)
+        _log_and_raise(task, 'There was an error trying to pull the requested container image')
 
     if description_file is None:
-        raise Exception('The container does not implement correctly the --description flag')
+        _log_std_err(task, client, description_folder)
+        _log_and_raise(task, 'The container does not implement correctly the --description flag')
 
-    with tempfile.TemporaryFile() as tf:
-        client.downloadFile(pull_file['_id'], tf)
-        tf.seek(0)
-        container_pull = json.loads(tf.read().decode())
+    with client.session() as session:
+        # If we have a NEWT session id we need set as a cookie so the redirect
+        # to the NEWT API works ( is authenticated ).
+        newt_session_id = parse('newt.sessionId').find(user)
+        if newt_session_id:
+            newt_session_id = newt_session_id[0].value
+            session.cookies.set('newt_sessionid', newt_session_id)
 
-    image = container_pull
+        with tempfile.TemporaryFile() as tf:
+            client.downloadFile(pull_file['_id'], tf)
+            tf.seek(0)
+            container_pull = json.loads(tf.read().decode())
 
-    with tempfile.TemporaryFile() as tf:
-        client.downloadFile(description_file['_id'], tf)
-        tf.seek(0)
-        container_description = json.loads(tf.read().decode())
+        image = container_pull
+
+        with tempfile.TemporaryFile() as tf:
+            client.downloadFile(description_file['_id'], tf)
+            tf.seek(0)
+            container_description = json.loads(tf.read().decode())
 
     # Add code name and version to the taskflow metadata
     code = {
@@ -298,7 +340,7 @@ def postprocess_description(task, _, input_, cluster, image, run_parameters, roo
 
 @cumulus.taskflow.task
 def setup_input(task, input_, cluster, image, run_parameters, root_folder, container_description):
-    task.taskflow.logger.info('Setting up calculation input.')
+    task.taskflow.logger.info('Setting up the calculation input files.')
 
     client = create_girder_client(
         task.taskflow.girder_api_url, task.taskflow.girder_token)
@@ -307,11 +349,11 @@ def setup_input(task, input_, cluster, image, run_parameters, root_folder, conta
         cluster = _get_cori(client)
 
     if '_id' not in cluster:
-        raise Exception('Invalid cluster configurations: %s' % cluster)
+        _log_and_raise(task, 'Invalid cluster configurations: %s' % cluster)
 
     calculation_id = parse('calculation._id').find(input_)
     if not calculation_id:
-        raise Exception('Unable to extract calculation id.')
+        _log_and_raise(task, 'Unable to extract calculation id.')
 
     calculation_id = calculation_id[0].value
     calculation = client.get('calculations/%s' % calculation_id)
@@ -340,6 +382,8 @@ def setup_input(task, input_, cluster, image, run_parameters, root_folder, conta
     output_folder = client.createFolder(root_folder['_id'], 'output')
     # The folder where the raw input/output files of the specific code are stored
     scratch_folder = client.createFolder(root_folder['_id'], 'scratch')
+    # The folder where the cluster stdout and stderr is saved
+    run_folder = client.createFolder(root_folder['_id'], 'run')
 
     # Save the input parameters to file
     with tempfile.TemporaryFile() as fp:
@@ -361,10 +405,10 @@ def setup_input(task, input_, cluster, image, run_parameters, root_folder, conta
         input_geometry_file = client.uploadFile(input_folder['_id'],  fp, name, size,
                                     parentType='folder')
 
-    submit_calculation.delay(input_, cluster, image, run_parameters, root_folder, container_description, input_folder, output_folder, scratch_folder)
+    submit_calculation.delay(input_, cluster, image, run_parameters, root_folder, container_description, input_folder, output_folder, scratch_folder, run_folder)
 
-def _create_job(task, cluster, image, run_parameters, container_description, input_folder, output_folder, scratch_folder):
-    params = _get_job_parameters(cluster, image, run_parameters)
+def _create_job(task, cluster, image, run_parameters, container_description, input_folder, output_folder, scratch_folder, run_folder):
+    params = _get_job_parameters(task, cluster, image, run_parameters)
     container = params['container']
     image_uri = params['imageUri']
     repository = params['repository']
@@ -372,8 +416,9 @@ def _create_job(task, cluster, image, run_parameters, container_description, inp
     host_dir = params['hostDir']
     guest_dir = params['guestDir']
     job_dir = params['jobDir']
+    job_parameters = params['jobParameters'];
 
-    task.taskflow.logger.info('Create %s job' % repository)
+    task.taskflow.logger.info('Creating %s job' % repository)
 
     input_format = container_description['input']['format']
     output_format = container_description['output']['format']
@@ -390,6 +435,15 @@ def _create_job(task, cluster, image, run_parameters, container_description, inp
         {
             'folderId': output_folder['_id'],
             'path': './output'
+        },
+        {
+            'folderId': run_folder['_id'],
+            'path': '.',
+            'exclude': [
+                'input',
+                'output',
+                'scratch'
+            ]
         }
     ]
 
@@ -405,19 +459,43 @@ def _create_job(task, cluster, image, run_parameters, container_description, inp
         'mkdir scratch'
     ]
 
+    # Each contain has a different bind arg
+    bind_args = {
+        'docker': '-v',
+        'singularity': '-B',
+        'shifter': '-V'
+    }
+
+    mount_option = '%s %s:%s' % (bind_args[container], host_dir, guest_dir)
+
     if container == 'docker':
-        mount_option = '-v %s:%s' % (host_dir, guest_dir)
         # In the docker case we need to ensure the image has been pull on this
         # node, as the images are not shared across the nodes.
         commands.append('docker pull %s' % image_uri)
-    else:
-        mount_option = ''
 
-    commands.append('%s run %s %s -g %s -p %s -o %s -s %s' % (
-            container, mount_option, image_uri,
-            geometry_filename, parameters_filename,
-            output_filename, scratch_dir
+    container_args = '-g %s -p %s -o %s -s %s' % (
+        geometry_filename, parameters_filename,
+        output_filename, scratch_dir
+    )
+
+    if container != 'shifter':
+        commands.append('%s run %s %s %s' % (
+            container, mount_option, image_uri, container_args
         ))
+    # Shifters syntax is pretty different so special case it
+    else:
+        commands.append('shifter %s --image=%s --entrypoint -- %s'  % (
+            mount_option, image_uri, container_args
+        ))
+
+    if _nersc(cluster):
+        # NERSC specific options
+        job_parameters.update({
+            'numberOfNodes': 1,
+            'queue': 'debug',
+            'constraint': 'haswell',
+            'account': os.environ.get('OC_ACCOUNT')
+        })
 
     body = {
         # ensure there are no special characters in the submission script name
@@ -431,9 +509,7 @@ def _create_job(task, cluster, image, run_parameters, container_description, inp
         ],
         'output': output,
         'uploadOutput': False,
-        'params': {
-            'taskFlowId': task.taskflow.id
-        }
+        'params': job_parameters
     }
 
     client = create_girder_client(
@@ -450,30 +526,60 @@ def _nersc(cluster):
 def _demo(cluster):
     return cluster.get('name') == 'demo_cluster'
 
+def _log_and_raise(task, msg):
+    _log_error(task, msg)
+    raise Exception(msg)
+
+def _log_error(task, msg):
+    task.taskflow.logger.error(msg)
+
+def _log_std_err(task, client, run_folder):
+    errors = _get_std_err(client, run_folder)
+    for e in errors:
+        _log_error(task, e)
+
+def _get_std_err(client, run_folder):
+    error_regex = re.compile(r'^.*\.e\d*$', re.IGNORECASE)
+    output_items = list(client.listItem(run_folder['_id']))
+    errors = []
+    for item in output_items:
+        if error_regex.match(item['name']):
+            files = list(client.listFile(item['_id']))
+            if len(files) != 1:
+                continue
+            with tempfile.TemporaryFile() as tf:
+                client.downloadFile(files[0]['_id'], tf)
+                tf.seek(0)
+                contents = tf.read().decode()
+                errors.append(contents)
+    return errors
+
 @cumulus.taskflow.task
-def submit_calculation(task, input_, cluster, image, run_parameters, root_folder, container_description, input_folder, output_folder, scratch_folder):
-    job = _create_job(task, cluster, image, run_parameters, container_description, input_folder, output_folder, scratch_folder)
+def submit_calculation(task, input_, cluster, image, run_parameters, root_folder, container_description, input_folder, output_folder, scratch_folder, run_folder):
+    job = _create_job(task, cluster, image, run_parameters, container_description, input_folder, output_folder, scratch_folder, run_folder)
 
     girder_token = task.taskflow.girder_token
     task.taskflow.set_metadata('cluster', cluster)
 
     # Now download and submit job to the cluster
-    task.taskflow.logger.info('Downloading input files to cluster.')
+    task.taskflow.logger.info('Uploading the input files to the cluster.')
     download_job_input_folders(cluster, job,
                                girder_token=girder_token, submit=False)
-    task.taskflow.logger.info('Downloading complete.')
 
-    task.taskflow.logger.info('Submitting job %s to cluster.' % job['_id'])
+    task.taskflow.logger.info('Submitting the calculation job %s to the queue.' % job['_id'])
 
     submit_job(cluster, job, girder_token=girder_token, monitor=False)
 
+    task.taskflow.logger.info('Submitted job %s to cluster.' % job['_id'])
+
     monitor_job.apply_async((cluster, job), {'girder_token': girder_token,
                                              'monitor_interval': 10},
-                            link=postprocess_job.s(input_, cluster, image, run_parameters, root_folder, container_description, input_folder, output_folder, scratch_folder, job))
+                                             countdown=_countdown(cluster),
+                            link=postprocess_job.s(input_, cluster, image, run_parameters, root_folder, container_description, input_folder, output_folder, scratch_folder, run_folder, job))
 
 @cumulus.taskflow.task
-def postprocess_job(task, _, input_, cluster, image, run_parameters, root_folder, container_description, input_folder, output_folder, scratch_folder, job):
-    task.taskflow.logger.info('Processing the results of the job.')
+def postprocess_job(task, _, input_, cluster, image, run_parameters, root_folder, container_description, input_folder, output_folder, scratch_folder, run_folder, job):
+    task.taskflow.logger.info('Processing the results of the calculation.')
     client = create_girder_client(
         task.taskflow.girder_api_url, task.taskflow.girder_token)
 
@@ -501,17 +607,25 @@ def postprocess_job(task, _, input_, cluster, image, run_parameters, root_folder
         if item['name'] == 'output.%s' % output_format:
             files = list(client.listFile(item['_id']))
             if len(files) != 1:
-                raise Exception('Expecting a single file under item, found: %s' + len(files))
+                _log_std_err(task, client, run_folder)
+                _log_and_raise(task, 'Expecting a single file under item, found: %s' % len(files))
             output_file = files[0]
             break
 
     if output_file is None:
-        raise Exception('The calculation did not produce any output file.')
+        # Log the job stderr
+        _log_std_err(task, client, run_folder)
+        _log_and_raise(task, 'The calculation did not produce any output file.')
+
+    # remove the run folder, only useful to access the stdout and stderr after the job is done
+    client.delete('folder/%s' % run_folder['_id'])
 
     # Now call endpoint to ingest result
     params = {
         'detectBonds': True
     }
+
+    task.taskflow.logger.info('Uploading the results of the calculation to the database.')
 
     body = {
         'fileId': output_file['_id'],
@@ -522,3 +636,5 @@ def postprocess_job(task, _, input_, cluster, image, run_parameters, root_folder
     }
 
     client.put('calculations/%s' % input_['calculation']['_id'], parameters=params, json=body)
+
+    task.taskflow.logger.log(STATUS_LEVEL, 'Done!')
