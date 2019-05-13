@@ -106,7 +106,7 @@ def import_structure(smiles=None, inchi=None, cjson=None):
     if not molecule:
         raise Exception('Molecule could not be imported with params', params)
 
-    return GirderMolecule(molecule['_id'], molecule['cjson'])
+    return GirderMolecule(molecule['_id'], molecule.get('cjson'))
 
 def find_molecule(identifier=None, inchi=None, smiles=None):
     molecule = _find_molecule(identifier, inchi, smiles)
