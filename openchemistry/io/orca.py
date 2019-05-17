@@ -7,11 +7,11 @@ from openchemistry.io.utils import (_cclib_to_cjson_basis,
 def OrcaReader(BaseReader):
     """A class to parse orca output files and dump a chemical json file"""
 
-    def read(self, output_file):
+    def read(self):
         """Read orca output file"""
         import cclib
         from pybel import readfile
-        molecule = next(readfile("orca", output_file))
+        molecule = next(readfile("orca", self._file))
 
         atom_numbers = []
         coordinates = []
@@ -30,7 +30,7 @@ def OrcaReader(BaseReader):
             "properties": {"molecular mass": molecular_mass},
         }
 
-        data = cclib.io.ccread(output_file)
+        data = cclib.io.ccread(self._file)
 
         # Add calculated properties
         if hasattr(data, "scfenergies"):
