@@ -158,7 +158,7 @@ def _fetch_calculation(molecule_id, image_name, input_parameters, input_geometry
 def _nersc():
     return os.environ.get('OC_SITE') == 'NERSC'
 
-def _submit_calculation(cluster_id, pending_calculation_id, image_name, run_parameters):
+def _submit_calculations(cluster_id, pending_calculation_ids, image_name, run_parameters):
     if cluster_id is None and not _nersc():
         # Try to get demo cluster
         params = {
@@ -182,7 +182,7 @@ def _submit_calculation(cluster_id, pending_calculation_id, image_name, run_para
     body = {
         'taskFlowClass': 'taskflows.OpenChemistryTaskFlow',
         'meta': {
-            'calculationId': pending_calculation_id,
+            'calculationIds': pending_calculation_ids,
             'image': {
                 'repository': repository,
                 'tag': tag
@@ -195,9 +195,7 @@ def _submit_calculation(cluster_id, pending_calculation_id, image_name, run_para
     # Start the taskflow
     body = {
         'input': {
-            'calculation': {
-                '_id': pending_calculation_id
-            }
+            'calculations': pending_calculation_ids
         },
         'image': {
             'repository': repository,
@@ -265,7 +263,7 @@ def _fetch_or_submit_calculation(molecule_id, image_name, input_parameters, inpu
 
     if calculation is None or force:
         calculation = _create_pending_calculation(molecule_id, image_name, input_parameters, input_geometry)
-        taskflow_id = _submit_calculation(GirderClient().cluster_id, calculation['_id'], image_name, run_parameters)
+        taskflow_id = _submit_calculations(GirderClient().cluster_id, [calculation['_id']], image_name, run_parameters)
         # Patch calculation to include taskflow id
         props = calculation['properties']
         props['taskFlowId'] = taskflow_id

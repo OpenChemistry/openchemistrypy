@@ -23,9 +23,11 @@ class OpenChemistryTaskFlow(TaskFlow):
     """
     {
         "input": {
-            "calculation": {
-                "_id": <the id of the pending calculation>
-            },
+            "calculations": [
+                <id of pending calculation #1>
+                <id of pending calculation #2>
+                ...
+            ],
         },
         "cluster": {
             "_id": <id of cluster to run on>
@@ -36,7 +38,7 @@ class OpenChemistryTaskFlow(TaskFlow):
         },
         "runParameters": {
             'container': <the container technology to be used: docker | singularity>,
-            'keepScratch': <whether to save the calculation raw output: default False>
+            'keepScratch': <whether to save the raw output of the calculations: default False>
         }
     }
     """
@@ -351,30 +353,33 @@ def setup_input(task, input_, cluster, image, run_parameters, root_folder, conta
     if '_id' not in cluster:
         _log_and_raise(task, 'Invalid cluster configurations: %s' % cluster)
 
-    calculation_id = parse('calculation._id').find(input_)
-    if not calculation_id:
-        _log_and_raise(task, 'Unable to extract calculation id.')
+    calculation_ids = parse('calculations').find(input_)
+    if not calculation_ids:
+        _log_and_raise(task, 'Unable to extract calculation ids.')
 
-    calculation_id = calculation_id[0].value
-    calculation = client.get('calculations/%s' % calculation_id)
-    molecule_id = calculation['moleculeId']
+    calculation_ids = calculation_ids[0].value
+    calculations = [client.get('calculations/%s' % x) for x in calculation_ids]
+    molecule_ids = [x['moleculeId'] for x in calculations]
 
-    input_parameters = calculation.get('input', {}).get('parameters', {})
+    input_parameters = [x.get('input', {}).get('parameters', {})
+                        for x in calculations]
 
     input_format = container_description['input']['format']
     output_format = container_description['output']['format']
 
-    # Fetch the starting geometry
-    r = client.get('molecules/%s/%s' % (molecule_id, input_format),
-                   jsonResp=False)
+    # Fetch the starting geometries
+    geometry_data = []
+    for molecule_id in molecule_ids:
+        r = client.get('molecules/%s/%s' % (molecule_id, input_format),
+                       jsonResp=False)
 
-    if r.status_code != 200:
-        raise Exception('Failed to get molecule in format: ' + input_format)
+        if r.status_code != 200:
+            raise Exception('Failed to get molecule in format: ' + input_format)
 
-    if input_format == 'cjson':
-        geometry_data = r.json()
-    else:
-        geometry_data = r.content.decode('utf-8')
+        if input_format == 'cjson':
+            geometry_data.append(r.json())
+        else:
+            geometry_data.append(r.content.decode('utf-8'))
 
     # The folder where the input geometry and input parameters are
     input_folder = client.createFolder(root_folder['_id'], 'input')
@@ -392,22 +397,25 @@ def setup_input(task, input_, cluster, image, run_parameters, root_folder, conta
         size = fp.seek(0, 2)
         fp.seek(0)
         name = 'input_parameters.json'
-        input_parameters_file = client.uploadFile(input_folder['_id'],  fp, name, size,
-                                    parentType='folder')
+        input_parameters_file = client.uploadFile(input_folder['_id'],  fp,
+                                                  name, size,
+                                                  parentType='folder')
 
-    # Save the input geometry to file
-    with tempfile.TemporaryFile() as fp:
-        fp.write(geometry_data.encode())
-        # Get the size of the file
-        size = fp.seek(0, 2)
-        fp.seek(0)
-        name = 'geometry.%s' % input_format
-        input_geometry_file = client.uploadFile(input_folder['_id'],  fp, name, size,
-                                    parentType='folder')
+    # Save the input geometries to files
+    for i, data in enumerate(geometry_data):
+        with tempfile.TemporaryFile() as fp:
+            fp.write(data.encode())
+            # Get the size of the file
+            size = fp.seek(0, 2)
+            fp.seek(0)
+            name = 'geometry_' + str(i + 1) + '.%s' % input_format
+            input_geometry_file = client.uploadFile(input_folder['_id'], fp,
+                                                    name, size,
+                                                    parentType='folder')
 
     submit_calculation.delay(input_, cluster, image, run_parameters, root_folder, container_description, input_folder, output_folder, scratch_folder, run_folder)
 
-def _create_job(task, cluster, image, run_parameters, container_description, input_folder, output_folder, scratch_folder, run_folder):
+def _create_job(task, input_, cluster, image, run_parameters, container_description, input_folder, output_folder, scratch_folder, run_folder):
     params = _get_job_parameters(task, cluster, image, run_parameters)
     container = params['container']
     image_uri = params['imageUri']
@@ -427,9 +435,15 @@ def _create_job(task, cluster, image, run_parameters, container_description, inp
     output_dir = os.path.join(guest_dir, job_dir, 'output')
     scratch_dir = os.path.join(guest_dir, job_dir, 'scratch')
 
-    geometry_filename = os.path.join(input_dir, 'geometry.%s' % input_format)
     parameters_filename = os.path.join(input_dir, 'input_parameters.json')
-    output_filename = os.path.join(output_dir, 'output.%s' % output_format)
+
+    calculation_ids = parse('calculations').find(input_)[0].value
+
+    geometry_filenames = []
+    output_filenames = []
+    for i in range(len(calculation_ids)):
+        geometry_filenames.append(os.path.join(input_dir, 'geometry_' + str(i + 1) + '.%s' % input_format))
+        output_filenames.append(os.path.join(output_dir, 'output_' + str(i + 1) + '.%s' % output_format))
 
     output = [
         {
@@ -473,10 +487,12 @@ def _create_job(task, cluster, image, run_parameters, container_description, inp
         # node, as the images are not shared across the nodes.
         commands.append('docker pull %s' % image_uri)
 
-    container_args = '-g %s -p %s -o %s -s %s' % (
-        geometry_filename, parameters_filename,
-        output_filename, scratch_dir
+    container_args = '-p %s -s %s' % (
+        parameters_filename, scratch_dir
     )
+
+    for g, o in zip(geometry_filenames, output_filenames):
+        container_args += ' -g %s -o %s' % (g, o)
 
     if container != 'shifter':
         commands.append('%s run %s %s %s' % (
@@ -556,7 +572,7 @@ def _get_std_err(client, run_folder):
 
 @cumulus.taskflow.task
 def submit_calculation(task, input_, cluster, image, run_parameters, root_folder, container_description, input_folder, output_folder, scratch_folder, run_folder):
-    job = _create_job(task, cluster, image, run_parameters, container_description, input_folder, output_folder, scratch_folder, run_folder)
+    job = _create_job(task, input_, cluster, image, run_parameters, container_description, input_folder, output_folder, scratch_folder, run_folder)
 
     girder_token = task.taskflow.girder_token
     task.taskflow.set_metadata('cluster', cluster)
@@ -566,7 +582,7 @@ def submit_calculation(task, input_, cluster, image, run_parameters, root_folder
     download_job_input_folders(cluster, job,
                                girder_token=girder_token, submit=False)
 
-    task.taskflow.logger.info('Submitting the calculation job %s to the queue.' % job['_id'])
+    task.taskflow.logger.info('Submitting job %s to the queue.' % job['_id'])
 
     submit_job(cluster, job, girder_token=girder_token, monitor=False)
 
@@ -588,7 +604,7 @@ def postprocess_job(task, _, input_, cluster, image, run_parameters, root_folder
 
     upload_job_output_to_folder(cluster, job, girder_token=task.taskflow.girder_token)
 
-    # remove temporary input folder folder, this data is attached to the calculation model
+    # remove temporary input folder, this data is attached to the calculation model
     client.delete('folder/%s' % input_folder['_id'])
 
     # clean up the scratch folder
@@ -601,21 +617,25 @@ def postprocess_job(task, _, input_, cluster, image, run_parameters, root_folder
 
     # ingest the output of the calculation
     output_format = container_description['output']['format']
-    output_file = None
+    output_files = []
     output_items = list(client.listItem(output_folder['_id']))
-    for item in output_items:
-        if item['name'] == 'output.%s' % output_format:
-            files = list(client.listFile(item['_id']))
-            if len(files) != 1:
-                _log_std_err(task, client, run_folder)
-                _log_and_raise(task, 'Expecting a single file under item, found: %s' % len(files))
-            output_file = files[0]
-            break
+    for i in range(len(input_['calculations'])):
+        output_file = None
+        for item in output_items:
+            if item['name'] == 'output_' + str(i + 1) + '.%s' % output_format:
+                files = list(client.listFile(item['_id']))
+                if len(files) != 1:
+                    _log_std_err(task, client, run_folder)
+                    _log_and_raise(task, 'Expecting a single file under item, found: %s' % len(files))
+                output_file = files[0]
+                break
 
-    if output_file is None:
-        # Log the job stderr
-        _log_std_err(task, client, run_folder)
-        _log_and_raise(task, 'The calculation did not produce any output file.')
+        if output_file is None:
+            # Log the job stderr
+            _log_std_err(task, client, run_folder)
+            _log_and_raise(task, 'The calculation did not produce any output file.')
+
+        output_files.append(output_file)
 
     # remove the run folder, only useful to access the stdout and stderr after the job is done
     client.delete('folder/%s' % run_folder['_id'])
@@ -627,14 +647,15 @@ def postprocess_job(task, _, input_, cluster, image, run_parameters, root_folder
 
     task.taskflow.logger.info('Uploading the results of the calculation to the database.')
 
-    body = {
-        'fileId': output_file['_id'],
-        'format': output_format,
-        'public': True,
-        'image': image, # image now also has a digest field, add it to the calculation
-        'scratchFolderId': scratch_folder_id
-    }
+    for i, output_file in enumerate(output_files):
+        body = {
+            'fileId': output_file['_id'],
+            'format': output_format,
+            'public': True,
+            'image': image, # image now also has a digest field, add it to the calculation
+            'scratchFolderId': scratch_folder_id
+        }
 
-    client.put('calculations/%s' % input_['calculation']['_id'], parameters=params, json=body)
+        client.put('calculations/%s' % input_['calculations'][i], parameters=params, json=body)
 
     task.taskflow.logger.log(STATUS_LEVEL, 'Done!')
