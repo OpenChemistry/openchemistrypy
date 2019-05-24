@@ -85,7 +85,7 @@ def _calculation_monitor(taskflow_ids):
 
     return table
 
-def import_structure(smiles=None, inchi=None, cjson=None):
+def import_structure(smiles=None, inchi=None, cjson=None, gen3d=True):
     # If the smiles begins with 'InChI=', then it is actually an inchi instead
     if smiles and smiles.startswith('InChI='):
         inchi = smiles
@@ -101,12 +101,13 @@ def import_structure(smiles=None, inchi=None, cjson=None):
     else:
         raise Exception('SMILES, InChI, or CJson must be provided')
 
+    params['generate3D'] = gen3d
     molecule = GirderClient().post('molecules', json=params)
 
     if not molecule:
         raise Exception('Molecule could not be imported with params', params)
 
-    return GirderMolecule(molecule['_id'], molecule['cjson'])
+    return GirderMolecule(molecule['_id'], molecule.get('cjson'))
 
 def find_molecule(identifier=None, inchi=None, smiles=None):
     molecule = _find_molecule(identifier, inchi, smiles)
