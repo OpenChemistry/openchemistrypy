@@ -1,4 +1,4 @@
-from IPython.display import display, JSON, DisplayObject
+from IPython.display import display, JSON, DisplayObject, SVG
 
 class CJSON(JSON):
     """A display class for displaying CJSON visualizations in the Jupyter Notebook and IPython kernel.
