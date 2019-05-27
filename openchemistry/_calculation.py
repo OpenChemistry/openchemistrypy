@@ -29,7 +29,10 @@ class GirderMolecule(Molecule):
 
     def calculate(self, image_name, input_parameters, input_geometry=None, run_parameters=None, force=False):
         molecule_id = self._id
-        calculation = _fetch_or_submit_calculation(molecule_id, image_name, input_parameters, input_geometry, run_parameters, force)
+        calculation = _fetch_or_submit_calculations([molecule_id], image_name,
+                                                    input_parameters,
+                                                    [input_geometry],
+                                                    run_parameters, force)[0]
         pending = parse('properties.pending').find(calculation)
         if pending:
             pending = pending[0].value
@@ -158,7 +161,8 @@ def _fetch_calculation(molecule_id, image_name, input_parameters, input_geometry
 def _nersc():
     return os.environ.get('OC_SITE') == 'NERSC'
 
-def _submit_calculations(cluster_id, pending_calculation_ids, image_name, run_parameters):
+def _submit_calculations(cluster_id, pending_calculation_ids, image_name,
+                         run_parameters):
     if cluster_id is None and not _nersc():
         # Try to get demo cluster
         params = {
@@ -257,27 +261,47 @@ def _create_pending_calculation(molecule_id, image_name, input_parameters, input
 def _delete_calculation(calculation_id):
     GirderClient().delete('calculations/%s' % calculation_id)
 
-def _fetch_or_submit_calculation(molecule_id, image_name, input_parameters, input_geometry=None, run_parameters=None, force=False):
-    calculation = _fetch_calculation(molecule_id, image_name, input_parameters, input_geometry)
-    taskflow_id = None
+def _fetch_or_submit_calculations(molecule_ids, image_name, input_parameters,
+                                  input_geometries=None, run_parameters=None,
+                                  force=False):
+    if input_geometries is None:
+        input_geometries = [None] * len(molecule_ids)
 
-    if calculation is None or force:
-        calculation = _create_pending_calculation(molecule_id, image_name, input_parameters, input_geometry)
-        taskflow_id = _submit_calculations(GirderClient().cluster_id, [calculation['_id']], image_name, run_parameters)
-        # Patch calculation to include taskflow id
-        props = calculation['properties']
-        props['taskFlowId'] = taskflow_id
-        calculation = GirderClient().put('calculations/%s/properties' % calculation['_id'], json=props)
-    else:
-        # If we already have a calculation tag it with this notebooks id
-        notebooks = calculation.setdefault('notebooks', [])
-        if GirderClient().file is not None:
-            notebooks.append(GirderClient().file['_id'])
+    calculations = []
+    pending_calculations = []
+    for molecule_id, input_geometry in zip(molecule_ids, input_geometries):
+        calculation = _fetch_calculation(molecule_id, image_name,
+                                         input_parameters, input_geometry)
+        if calculation is None or force:
+            calculation = _create_pending_calculation(molecule_id, image_name,
+                                                      input_parameters,
+                                                      input_geometry)
+            pending_calculations.append(calculation)
+        else:
+            # If we already have a calculation tag it with this notebooks id
+            notebooks = calculation.setdefault('notebooks', [])
+            if GirderClient().file is not None:
+                notebooks.append(GirderClient().file['_id'])
 
-        body = {
-            'notebooks': notebooks
-        }
-        GirderClient().patch('calculations/%s/notebooks' % calculation['_id'],
-                            json=body)
+            body = {
+                'notebooks': notebooks
+            }
+            GirderClient().patch('calculations/%s/notebooks' %
+                                 calculation['_id'],
+                                 json=body)
 
-    return calculation
+        calculations.append(calculation)
+
+    if len(pending_calculations) != 0:
+        calc_ids = [x['_id'] for x in pending_calculations]
+        taskflow_id = _submit_calculations(GirderClient().cluster_id, calc_ids,
+                                           image_name, run_parameters)
+
+        for i, calculation in enumerate(pending_calculations):
+            # Patch calculation to include taskflow id
+            props = calculation['properties']
+            props['taskFlowId'] = taskflow_id
+            calculations[i] = GirderClient().put(
+                'calculations/%s/properties' % calculation['_id'], json=props)
+
+    return calculations
