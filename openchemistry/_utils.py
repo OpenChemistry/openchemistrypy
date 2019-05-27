@@ -133,3 +133,10 @@ def parse_image_name(image_name):
         repository, tag = split
 
     return repository, tag
+
+def cjson_has_3d_coords(cjson):
+    coords = parse('atoms.coords').find(cjson)
+    if (coords and '3d' in coords[0].value and
+        len(coords[0].value['3d']) > 0):
+        return True
+    return False

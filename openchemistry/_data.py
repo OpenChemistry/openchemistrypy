@@ -75,6 +75,16 @@ class MoleculeProvider(CjsonProvider):
     def __init__(self, cjson, molecule_id):
         super(MoleculeProvider, self).__init__(cjson)
         self._id = molecule_id
+        self._svg_ = None
+
+    @property
+    def svg(self):
+        if self._svg_ is None:
+            resp = GirderClient().get('molecules/%s/svg' % self._id,
+                                      jsonResp=False)
+            self._svg_ = resp.content.decode('utf-8')
+
+        return self._svg_
 
     @property
     def url(self):
