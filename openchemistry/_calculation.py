@@ -33,22 +33,7 @@ class GirderMolecule(Molecule):
                                                     input_parameters,
                                                     [input_geometry],
                                                     run_parameters, force)[0]
-        pending = parse('properties.pending').find(calculation)
-        if pending:
-            pending = pending[0].value
-
-        taskflow_id = parse('properties.taskFlowId').find(calculation)
-        if taskflow_id:
-            taskflow_id = taskflow_id[0].value
-        else:
-            taskflow_id = None
-
-        calculation = CalculationResult(calculation['_id'], calculation['properties'], molecule_id)
-
-        if pending:
-            calculation = PendingCalculationResultWrapper(calculation, taskflow_id)
-
-        return calculation
+        return _calculation_result(calculation, molecule_id)
 
     def energy(self, image_name, input_parameters, input_geometry=None, run_parameters=None, force=False):
         params = {'task': 'energy'}
@@ -305,3 +290,22 @@ def _fetch_or_submit_calculations(molecule_ids, image_name, input_parameters,
                 'calculations/%s/properties' % calculation['_id'], json=props)
 
     return calculations
+
+def _calculation_result(calculation, molecule_id):
+    pending = parse('properties.pending').find(calculation)
+    if pending:
+        pending = pending[0].value
+
+    result = CalculationResult(calculation['_id'], calculation['properties'],
+                               molecule_id)
+
+    if pending:
+        taskflow_id = parse('properties.taskFlowId').find(calculation)
+        if taskflow_id:
+            taskflow_id = taskflow_id[0].value
+        else:
+            taskflow_id = None
+
+        result = PendingCalculationResultWrapper(result, taskflow_id)
+
+    return result
