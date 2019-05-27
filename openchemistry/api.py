@@ -5,7 +5,10 @@ import avogadro
 
 from ._girder import GirderClient
 from ._molecule import Molecule
-from ._calculation import GirderMolecule, CalculationResult, AttributeInterceptor, _fetch_calculation
+from ._calculation import (
+    GirderMolecule, CalculationResult, AttributeInterceptor,
+    _fetch_calculation, _fetch_or_submit_calculations, _calculation_result
+)
 from ._data import CjsonProvider, AvogadroProvider
 from ._utils import fetch_or_create_queue
 
@@ -200,3 +203,40 @@ def find_spectra(identifier, stype='IR', source='NIST'):
     spectra = GirderClient().get('experiments', parameters=params)
 
     return spectra
+
+def run_calculations(girder_molecules, image_name, input_parameters,
+                     input_geometries=None, run_parameters=None,
+                     force=False):
+    """Run multiple calculations in one taskflow
+
+    This will search for each calculation to see if it has already been
+    done. If it has been done, it will not run it unless force is true.
+    It will then submit all calculations that need to be submitted.
+
+    Parameters
+    ----------
+    girder_molecules : list of GirderMolecule
+        The list of molecules for which to run calculations
+    image_name : str
+        The name of the image to run the calculations on
+    input_paramters : dict
+        The input parameters for the taskflow
+    input_geometries: list of str
+        The input geometries of the molecules
+    run_paramters : dict
+        The run parameters for the taskflow
+    force : bool
+        Force all of the calculations to be performed, even if they
+        have already been run once.
+    """
+    molecule_ids = [x._id for x in girder_molecules]
+    calculations = _fetch_or_submit_calculations(molecule_ids, image_name,
+                                                 input_parameters,
+                                                 input_geometries,
+                                                 run_parameters, force)
+
+    results = []
+    for c, m in zip(calculations, molecule_ids):
+        results.append(_calculation_result(c, m))
+
+    return results
