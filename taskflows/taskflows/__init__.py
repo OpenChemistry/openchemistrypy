@@ -364,6 +364,15 @@ def setup_input(task, input_, cluster, image, run_parameters, root_folder, conta
     input_parameters = [x.get('input', {}).get('parameters', {})
                         for x in calculations]
 
+    # For now, we only allow multiple calculations if all of the input
+    # parameters are the same. Raise an error if they differ.
+    if not all(x == input_parameters[0] for x in input_parameters):
+        msg = ('For running multiple calculations, all input parameters must '
+               'currently be identical')
+        _log_and_raise(task, msg)
+
+    input_parameters = input_parameters[0]
+
     input_format = container_description['input']['format']
     output_format = container_description['output']['format']
 
