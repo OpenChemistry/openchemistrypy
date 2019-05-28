@@ -286,8 +286,10 @@ def _fetch_or_submit_calculations(molecule_ids, image_name, input_parameters,
             # Patch calculation to include taskflow id
             props = calculation['properties']
             props['taskFlowId'] = taskflow_id
-            calculations[i] = GirderClient().put(
+            pending_calculations[i] = GirderClient().put(
                 'calculations/%s/properties' % calculation['_id'], json=props)
+            index = calculations.index(calculation)
+            calculations[index] = pending_calculations[i]
 
     return calculations
 
