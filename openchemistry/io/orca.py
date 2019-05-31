@@ -1,16 +1,19 @@
-from openchemistry.io.base import BaseReader
-from openchemistry.io.constants import EV_TO_J_MOL
-from openchemistry.io.utils import (_cclib_to_cjson_basis,
-                                    _cclib_to_cjson_vibdisps)
+from .utils import (
+    _cclib_to_cjson_basis,
+    _cclib_to_cjson_vibdisps,
+)
+from .base import BaseReader
+from .constants import EV_TO_J_MOL
 
 
-def OrcaReader(BaseReader):
+class OrcaReader(BaseReader):
     """A class to parse orca output files and dump a chemical json file"""
 
     def read(self):
         """Read orca output file"""
         import cclib
         from pybel import readfile
+
         molecule = next(readfile("orca", self._file))
 
         atom_numbers = []
@@ -26,7 +29,10 @@ def OrcaReader(BaseReader):
 
         cjson = {
             "chemical json": 0,
-            "atoms": {"elements": {"number": atom_numbers}, "coords": {"3d": coordinates}},
+            "atoms": {
+                "elements": {"number": atom_numbers},
+                "coords": {"3d": coordinates},
+            },
             "properties": {"molecular mass": molecular_mass},
         }
 
