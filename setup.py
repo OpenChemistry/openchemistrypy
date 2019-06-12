@@ -31,6 +31,7 @@ setup(
     setup_requires=['setuptools_scm'],
     description='',
     long_description=long_description,
+    long_description_content_type='text/markdown',
     url='https://github.com/OpenChemistry/openchemistrypy',
     author='Kitware Inc',
     license='BSD 3-Clause',

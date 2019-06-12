@@ -15,7 +15,7 @@ jobs:
           name: install release dependencies
           command: |
             . ../venv/bin/activate
-            pip install twine setuptools_scm
+            pip install -U twine setuptools setuptools_scm
       - run:
           name: build the project
           command: |
