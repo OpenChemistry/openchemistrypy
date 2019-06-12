@@ -2,6 +2,8 @@ import os
 import inspect
 from jsonpath_rw import parse
 
+from girder_client import HttpError
+
 from ._girder import GirderClient
 from ._molecule import Molecule
 from ._data import MoleculeProvider, CalculationProvider
@@ -13,7 +15,15 @@ class GirderMolecule(Molecule):
     '''
     def __init__(self, _id, cjson=None):
         if cjson is None:
-            cjson = GirderClient().get('molecules/%s/cjson' % _id)
+            try:
+                cjson = GirderClient().get('molecules/%s/cjson' % _id)
+            except HttpError as ex:
+                if ex.status == 404:
+                    # The molecule does not have 3D coordinates
+                    cjson = None
+                else:
+                    raise
+
         super(GirderMolecule, self).__init__(MoleculeProvider(cjson, _id))
         self._id = _id
 
