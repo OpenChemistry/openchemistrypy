@@ -7,7 +7,9 @@ from girder_client import HttpError
 from ._girder import GirderClient
 from ._molecule import Molecule
 from ._data import MoleculeProvider, CalculationProvider
-from ._utils import fetch_or_create_queue, hash_object, parse_image_name
+from ._utils import (
+    fetch_or_create_queue, hash_object, parse_image_name, mol_has_3d_coords
+)
 
 class GirderMolecule(Molecule):
     '''
@@ -215,6 +217,11 @@ def _fetch_taskflow_status(taskflow_id):
 def _create_pending_calculation(molecule_id, image_name, input_parameters, input_geometry=None):
     repository, tag = parse_image_name(image_name)
 
+    if _3d_coords_required(image_name) and not _mol_has_3d_coords(molecule_id):
+        _generate_3d_coords(molecule_id)
+        msg = 'Generating 3D coordinates, please re-run the calculation soon'
+        raise Exception(msg)
+
     notebooks = []
     if GirderClient().file is not None:
         notebooks.append(GirderClient().file['_id'])
@@ -311,3 +318,23 @@ def _calculation_result(calculation, molecule_id):
         result = PendingCalculationResultWrapper(result, taskflow_id)
 
     return result
+
+def _3d_coords_required(image_name):
+    # We will have a list of programs that require 3D coordinates
+    require_3d_coords_list = [
+        'psi4',
+        'nwchem'
+    ]
+
+    for program in require_3d_coords_list:
+        if program in image_name:
+            return True
+
+    return False
+
+def _mol_has_3d_coords(mol_id):
+    mol = GirderClient().get('molecules/%s' % mol_id)
+    return mol_has_3d_coords(mol)
+
+def _generate_3d_coords(mol_id):
+    GirderClient().post('molecules/%s/3d' % mol_id)
