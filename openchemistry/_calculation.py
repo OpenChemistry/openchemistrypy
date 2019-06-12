@@ -139,12 +139,11 @@ def _fetch_calculation(molecule_id, image_name, input_parameters, input_geometry
     if input_geometry:
         parameters['inputGeometryHash'] = hash_object(input_geometry)
 
-    calculations = GirderClient().get('calculations', parameters)
-
-    if len(calculations) < 1:
+    res = GirderClient().get('calculations', parameters)
+    if 'results' not in res or len(res['results']) < 1:
         return None
 
-    return calculations[0]
+    return res['results'][0]
 
 def _nersc():
     return os.environ.get('OC_SITE') == 'NERSC'
