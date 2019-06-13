@@ -31,11 +31,12 @@ class GirderMolecule(Molecule):
 
     def calculate(self, image_name, input_parameters, input_geometry=None, run_parameters=None, force=False):
         molecule_id = self._id
-        calculation = _fetch_or_submit_calculations([molecule_id], image_name,
-                                                    input_parameters,
-                                                    [input_geometry],
-                                                    run_parameters, force)[0]
-        return _calculation_result(calculation, molecule_id)
+        calculations = _fetch_or_submit_calculations([molecule_id], image_name,
+                                                     input_parameters,
+                                                     [input_geometry],
+                                                     run_parameters, force)
+        if calculations:
+            return _calculation_result(calculations[0], molecule_id)
 
     def energy(self, image_name, input_parameters, input_geometry=None, run_parameters=None, force=False):
         params = {'task': 'energy'}
@@ -252,7 +253,11 @@ def _fetch_or_submit_calculations(molecule_ids, image_name, input_parameters,
                                   input_geometries=None, run_parameters=None,
                                   force=False):
 
-    _check_required_coords(molecule_ids, image_name)
+    try:
+        _check_required_coords(molecule_ids, image_name)
+    except Exception as e:
+        print(str(e))
+        return []
 
     if input_geometries is None:
         input_geometries = [None] * len(molecule_ids)
