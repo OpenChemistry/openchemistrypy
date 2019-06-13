@@ -31,11 +31,12 @@ class GirderMolecule(Molecule):
 
     def calculate(self, image_name, input_parameters, input_geometry=None, run_parameters=None, force=False):
         molecule_id = self._id
-        calculation = _fetch_or_submit_calculations([molecule_id], image_name,
-                                                    input_parameters,
-                                                    [input_geometry],
-                                                    run_parameters, force)[0]
-        return _calculation_result(calculation, molecule_id)
+        calculations = _fetch_or_submit_calculations([molecule_id], image_name,
+                                                     input_parameters,
+                                                     [input_geometry],
+                                                     run_parameters, force)
+        if calculations:
+            return _calculation_result(calculations[0], molecule_id)
 
     def energy(self, image_name, input_parameters, input_geometry=None, run_parameters=None, force=False):
         params = {'task': 'energy'}
@@ -217,11 +218,6 @@ def _fetch_taskflow_status(taskflow_id):
 def _create_pending_calculation(molecule_id, image_name, input_parameters, input_geometry=None):
     repository, tag = parse_image_name(image_name)
 
-    if _3d_coords_required(image_name) and not _mol_has_3d_coords(molecule_id):
-        _generate_3d_coords(molecule_id)
-        msg = 'Generating 3D coordinates, please re-run the calculation soon'
-        raise Exception(msg)
-
     notebooks = []
     if GirderClient().file is not None:
         notebooks.append(GirderClient().file['_id'])
@@ -256,6 +252,13 @@ def _delete_calculation(calculation_id):
 def _fetch_or_submit_calculations(molecule_ids, image_name, input_parameters,
                                   input_geometries=None, run_parameters=None,
                                   force=False):
+
+    try:
+        _check_required_coords(molecule_ids, image_name)
+    except Exception as e:
+        print(str(e))
+        return []
+
     if input_geometries is None:
         input_geometries = [None] * len(molecule_ids)
 
@@ -338,3 +341,15 @@ def _mol_has_3d_coords(mol_id):
 
 def _generate_3d_coords(mol_id):
     GirderClient().post('molecules/%s/3d' % mol_id)
+
+def _check_required_coords(mol_ids, image_name):
+    raise_exception = False
+    if _3d_coords_required(image_name):
+        for mol_id in mol_ids:
+            if not _mol_has_3d_coords(mol_id):
+                _generate_3d_coords(mol_id)
+                raise_exception = True
+
+    if raise_exception:
+        msg = 'Generating 3D coordinates, please re-run the calculation soon'
+        raise Exception(msg)
