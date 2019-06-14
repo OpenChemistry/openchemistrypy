@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 import urllib.parse
 
-from ._utils import hash_object, camel_to_space
+from ._utils import hash_object, camel_to_space, cjson_has_3d_coords
 
 class Visualization(ABC):
     def __init__(self, provider):
@@ -22,6 +22,15 @@ class Visualization(ABC):
             'play': play,
             **self._transfer_function_to_params(transfer_function)
         }
+
+        # Show SVG if 3D coords are not available
+        if not cjson_has_3d_coords(self._provider.cjson):
+            try:
+                from ._notebook import SVG
+                return SVG(self._provider.svg)
+            except ImportError:
+                print(self._provider.svg)
+
         try:
             from ._notebook import CJSON
             return CJSON(self._provider.cjson, **self._params)
