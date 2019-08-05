@@ -155,15 +155,6 @@ def start(task, input_, user, cluster, image, run_parameters):
     description_folder = client.createFolder(root_folder['_id'],
                                     'description')
 
-    # save the pull.py script to the job directory
-    with open(os.path.join(os.path.dirname(__file__), 'utils/pull.py'), 'rb') as f:
-        # Get the size of the file
-        size = f.seek(0, 2)
-        f.seek(0)
-        name = 'pull.py'
-        input_parameters_file = client.uploadFile(description_folder['_id'],  f, name, size,
-                                    parentType='folder')
-
     job = _create_description_job(task, cluster, description_folder, image, run_parameters)
 
     # Now download pull.py script to the cluster
@@ -184,7 +175,6 @@ def _get_job_parameters(task, cluster, image, run_parameters):
     repository = image.get('repository')
     tag = image.get('tag')
     digest = image.get('digest')
-    image_uri = image.get('imageUri')
     host_dir = '$(pwd)' # the host directory being mounted into the container
     guest_dir = '/data' # the directory inside the container pointing to host_dir
     job_dir = '' # relative path from guest_dir to the job directory
@@ -215,7 +205,6 @@ def _get_job_parameters(task, cluster, image, run_parameters):
 
     return {
         'container': container,
-        'imageUri': image_uri,
         'repository': repository,
         'tag': tag,
         'digest': digest,
@@ -242,9 +231,8 @@ def _create_description_job(task, cluster, description_folder, image, run_parame
         run_command = 'shifter --image=$IMAGE_NAME --entrypoint --'
 
     commands = setup_commands + [
-        'IMAGE_NAME=$(python pull.py -r %s -t %s -c %s | tail -1)' % (repository, tag, container),
-        '%s -d > %s' % (run_command, output_file),
-        'rm pull.py'
+        'IMAGE_NAME=%s:%s' % (repository, tag),
+        '%s -d > %s' % (run_command, output_file)
     ]
 
     body = {
@@ -289,7 +277,6 @@ def postprocess_description(task, _, input_, user, cluster, image, run_parameter
     description_items = list(client.listItem(description_folder['_id']))
 
     description_file = None
-    pull_file = None
     for item in description_items:
         if item['name'] == 'description.json':
             files = list(client.listFile(item['_id']))
@@ -297,17 +284,6 @@ def postprocess_description(task, _, input_, user, cluster, image, run_parameter
                 _log_std_err(task, client, description_folder)
                 _log_and_raise(task, 'Expecting a single file under item, found: %s' % len(files))
             description_file = files[0]
-
-        elif item['name'] == 'pull.json':
-            files = list(client.listFile(item['_id']))
-            if len(files) != 1:
-                _log_std_err(task, client, description_folder)
-                _log_and_raise(task, 'Expecting a single file under item, found: %s' % len(files))
-            pull_file = files[0]
-
-    if pull_file is None:
-        _log_std_err(task, client, description_folder)
-        _log_and_raise(task, 'There was an error trying to pull the requested container image')
 
     if description_file is None:
         _log_std_err(task, client, description_folder)
@@ -320,13 +296,6 @@ def postprocess_description(task, _, input_, user, cluster, image, run_parameter
         if newt_session_id:
             newt_session_id = newt_session_id[0].value
             session.cookies.set('newt_sessionid', newt_session_id)
-
-        with tempfile.TemporaryFile() as tf:
-            client.downloadFile(pull_file['_id'], tf)
-            tf.seek(0)
-            container_pull = json.loads(tf.read().decode())
-
-        image = container_pull
 
         with tempfile.TemporaryFile() as tf:
             client.downloadFile(description_file['_id'], tf)
@@ -440,7 +409,6 @@ def setup_input(task, input_, cluster, image, run_parameters, root_folder, conta
 def _create_job(task, input_, cluster, image, run_parameters, container_description, input_folder, output_folder, scratch_folder, run_folder):
     params = _get_job_parameters(task, cluster, image, run_parameters)
     container = params['container']
-    image_uri = params['imageUri']
     repository = params['repository']
     digest = params['digest']
     host_dir = params['hostDir']
@@ -504,11 +472,6 @@ def _create_job(task, input_, cluster, image, run_parameters, container_descript
 
     mount_option = '%s %s:%s' % (bind_args[container], host_dir, guest_dir)
 
-    if container == 'docker':
-        # In the docker case we need to ensure the image has been pull on this
-        # node, as the images are not shared across the nodes.
-        commands.append('docker pull %s' % image_uri)
-
     container_args = '-p %s -s %s' % (
         parameters_filename, scratch_dir
     )
@@ -516,14 +479,15 @@ def _create_job(task, input_, cluster, image, run_parameters, container_descript
     for g, o in zip(geometry_filenames, output_filenames):
         container_args += ' -g %s -o %s' % (g, o)
 
+    image_str = image.get('repository') + ':' + image.get('tag')
     if container != 'shifter':
         commands.append('%s run %s %s %s' % (
-            container, mount_option, image_uri, container_args
+            container, mount_option, image_str, container_args
         ))
     # Shifters syntax is pretty different so special case it
     else:
         commands.append('shifter %s --image=%s --entrypoint -- %s'  % (
-            mount_option, image_uri, container_args
+            mount_option, image_str, container_args
         ))
 
     if _nersc(cluster):
