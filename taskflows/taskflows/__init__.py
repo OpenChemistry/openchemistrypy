@@ -74,6 +74,9 @@ class OpenChemistryTaskFlow(TaskFlow):
             start.s(input_, user, cluster, image, run_parameters),
             *args, **kwargs)
 
+def _image_to_sif(image_str):
+    return os.path.join('~', '.oc', 'singularity', image_str + '.sif')
+
 def _get_cori(client):
     params = {
         'type': 'newt'
@@ -157,7 +160,6 @@ def start(task, input_, user, cluster, image, run_parameters):
 
     job = _create_description_job(task, cluster, description_folder, image, run_parameters)
 
-    # Now download pull.py script to the cluster
     task.taskflow.logger.info('Preparing job to obtain the container description.')
     download_job_input_folders(cluster, job,
                                girder_token=task.taskflow.girder_token, submit=False)
@@ -230,8 +232,13 @@ def _create_description_job(task, cluster, description_folder, image, run_parame
     if container == 'shifter':
         run_command = 'shifter --image=$IMAGE_NAME --entrypoint --'
 
+    image_name = '%s:%s' % (repository, tag)
+    if container == 'singularity':
+        # Include the path to the singularity dir, and the extension
+        image_name = _image_to_sif(image_name)
+
     commands = setup_commands + [
-        'IMAGE_NAME=%s:%s' % (repository, tag),
+        'IMAGE_NAME=%s' % image_name,
         '%s -d > %s' % (run_command, output_file)
     ]
 
@@ -480,6 +487,11 @@ def _create_job(task, input_, cluster, image, run_parameters, container_descript
         container_args += ' -g %s -o %s' % (g, o)
 
     image_str = image.get('repository') + ':' + image.get('tag')
+
+    if container == 'singularity':
+        # Include the path to the singularity dir, and the extension
+        image_str = _image_to_sif(image_str)
+
     if container != 'shifter':
         commands.append('%s run %s %s %s' % (
             container, mount_option, image_str, container_args
