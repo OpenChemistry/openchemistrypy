@@ -360,6 +360,7 @@ def setup_input(task, input_, cluster, image, run_parameters, root_folder, conta
     calculation_ids = calculation_ids[0].value
     calculations = [client.get('calculations/%s' % x) for x in calculation_ids]
     molecule_ids = [x['moleculeId'] for x in calculations]
+    geometry_ids = [x.get('geometryId') for x in calculations]
 
     input_parameters = [x.get('input', {}).get('parameters', {})
                         for x in calculations]
@@ -378,9 +379,16 @@ def setup_input(task, input_, cluster, image, run_parameters, root_folder, conta
 
     # Fetch the starting geometries
     geometry_data = []
-    for molecule_id in molecule_ids:
-        r = client.get('molecules/%s/%s' % (molecule_id, input_format),
-                       jsonResp=False)
+    for molecule_id, geometry_id in zip(molecule_ids, geometry_ids):
+
+        path = 'molecules/%s/' % molecule_id
+        if geometry_id:
+            # It is preferred to use the geometry if we have it
+            path += 'geometries/%s/' % geometry_id
+
+        path += '%s' % input_format
+
+        r = client.get(path, jsonResp=False)
 
         if r.status_code != 200:
             raise Exception('Failed to get molecule in format: ' + input_format)

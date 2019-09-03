@@ -29,29 +29,29 @@ class GirderMolecule(Molecule):
         super(GirderMolecule, self).__init__(MoleculeProvider(cjson, _id))
         self._id = _id
 
-    def calculate(self, image_name, input_parameters, input_geometry=None, run_parameters=None, force=False):
+    def calculate(self, image_name, input_parameters, geometry_id=None, run_parameters=None, force=False):
         molecule_id = self._id
         calculations = _fetch_or_submit_calculations([molecule_id], image_name,
                                                      input_parameters,
-                                                     [input_geometry],
+                                                     [geometry_id],
                                                      run_parameters, force)
         if calculations:
             return _calculation_result(calculations[0], molecule_id)
 
-    def energy(self, image_name, input_parameters, input_geometry=None, run_parameters=None, force=False):
+    def energy(self, image_name, input_parameters, geometry_id=None, run_parameters=None, force=False):
         params = {'task': 'energy'}
         params.update(input_parameters)
-        return self.calculate(image_name, params, input_geometry, run_parameters, force)
+        return self.calculate(image_name, params, geometry_id, run_parameters, force)
 
-    def optimize(self, image_name, input_parameters, input_geometry=None, run_parameters=None, force=False):
+    def optimize(self, image_name, input_parameters, geometry_id=None, run_parameters=None, force=False):
         params = {'task': 'optimize'}
         params.update(input_parameters)
-        return self.calculate(image_name, params, input_geometry, run_parameters, force)
+        return self.calculate(image_name, params, geometry_id, run_parameters, force)
 
-    def frequencies(self, image_name, input_parameters, input_geometry=None, run_parameters=None, force=False):
+    def frequencies(self, image_name, input_parameters, geometry_id=None, run_parameters=None, force=False):
         params = {'task': 'frequencies'}
         params.update(input_parameters)
-        return self.calculate(image_name, params, input_geometry, run_parameters, force)
+        return self.calculate(image_name, params, geometry_id, run_parameters, force)
 
     def set_name(self, name):
         body = {
@@ -129,7 +129,7 @@ class PendingCalculationResultWrapper(AttributeInterceptor):
         super(PendingCalculationResultWrapper, self).__init__(calculation,
                                                               table, intercept)
 
-def _fetch_calculation(molecule_id, image_name, input_parameters, input_geometry=None):
+def _fetch_calculation(molecule_id, image_name, input_parameters, geometry_id=None):
     repository, tag = parse_image_name(image_name)
     parameters = {
         'moleculeId': molecule_id,
@@ -137,8 +137,8 @@ def _fetch_calculation(molecule_id, image_name, input_parameters, input_geometry
         'imageName': '%s:%s' % (repository, tag)
     }
 
-    if input_geometry:
-        parameters['inputGeometryHash'] = hash_object(input_geometry)
+    if geometry_id:
+        parameters['geometryId'] = geometry_id
 
     res = GirderClient().get('calculations', parameters)
     if 'results' not in res or len(res['results']) < 1:
@@ -215,7 +215,7 @@ def _fetch_taskflow_status(taskflow_id):
 
     return r['status']
 
-def _create_pending_calculation(molecule_id, image_name, input_parameters, input_geometry=None):
+def _create_pending_calculation(molecule_id, image_name, input_parameters, geometry_id=None):
     repository, tag = parse_image_name(image_name)
 
     notebooks = []
@@ -239,8 +239,8 @@ def _create_pending_calculation(molecule_id, image_name, input_parameters, input
         'notebooks': notebooks
     }
 
-    if input_geometry is not None:
-        body['input']['geometry'] = input_geometry
+    if geometry_id is not None:
+        body['geometryId'] = geometry_id
 
     calculation = GirderClient().post('calculations', json=body)
 
@@ -250,7 +250,7 @@ def _delete_calculation(calculation_id):
     GirderClient().delete('calculations/%s' % calculation_id)
 
 def _fetch_or_submit_calculations(molecule_ids, image_name, input_parameters,
-                                  input_geometries=None, run_parameters=None,
+                                  geometry_ids=None, run_parameters=None,
                                   force=False):
 
     try:
@@ -259,18 +259,18 @@ def _fetch_or_submit_calculations(molecule_ids, image_name, input_parameters,
         print(str(e))
         return []
 
-    if input_geometries is None:
-        input_geometries = [None] * len(molecule_ids)
+    if geometry_ids is None:
+        geometry_ids = [None] * len(molecule_ids)
 
     calculations = []
     pending_calculations = []
-    for molecule_id, input_geometry in zip(molecule_ids, input_geometries):
+    for molecule_id, geometry_id in zip(molecule_ids, geometry_ids):
         calculation = _fetch_calculation(molecule_id, image_name,
-                                         input_parameters, input_geometry)
+                                         input_parameters, geometry_id)
         if calculation is None or force:
             calculation = _create_pending_calculation(molecule_id, image_name,
                                                       input_parameters,
-                                                      input_geometry)
+                                                      geometry_id)
             pending_calculations.append(calculation)
         else:
             # If we already have a calculation tag it with this notebooks id
