@@ -4,27 +4,15 @@ import re
 
 from . import avogadro
 
-def ensure_singularity_dir():
-    home = os.path.expanduser('~')
-    singularity_dir = os.path.join(home, '.oc', 'singularity')
 
-    try:
-        os.makedirs(singularity_dir)
-    except OSError as exc:
-        if exc.errno == errno.EEXIST and os.path.isdir(singularity_dir):
-            pass
-        else:
-            raise
-
-    return singularity_dir
+def sif_dir():
+    return '$HOME/.oc/singularity'
 
 
 def image_to_sif(image_str):
-    sif_dir = ensure_singularity_dir()
-
     # Let's remove special characters from the image string
     name = '%s.sif' % re.sub('[^a-zA-Z0-9]', '_', image_str)
-    return os.path.join(sif_dir, name)
+    return os.path.join(sif_dir(), name)
 
 
 def cjson_to_xyz(cjson):

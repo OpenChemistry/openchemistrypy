@@ -131,8 +131,16 @@ def _create_job(task, cluster, image, container):
     if container == 'singularity':
         # Include the path to the singularity dir, and the extension
         image_str = image_to_sif(image_name)
+
+        # Make sure the directory exists where we will put the sif file
+        setup_commands.append('mkdir -p ' + os.path.dirname(image_str))
+
+        # Force an overwite of the image if it already exists
+        build_options = ['-F']
+
         docker_uri = 'docker://%s' % image_name
-        run_command = 'singularity build %s %s' % (image_str, docker_uri)
+        run_command = 'singularity build ' + ' '.join(build_options)
+        run_command += ' %s %s' % (image_str, docker_uri)
     else:
         run_command = '%s pull %s' % (container, image_name)
 
