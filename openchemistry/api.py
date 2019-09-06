@@ -5,7 +5,10 @@ import avogadro
 
 from ._girder import GirderClient
 from ._molecule import Molecule
-from ._calculation import GirderMolecule, CalculationResult, AttributeInterceptor, _fetch_calculation
+from ._calculation import (
+    GirderMolecule, CalculationResult, AttributeInterceptor,
+    _fetch_calculation, _fetch_or_submit_calculations, _calculation_result
+)
 from ._data import CjsonProvider, AvogadroProvider
 from ._utils import fetch_or_create_queue
 
@@ -57,17 +60,17 @@ def _find_molecule_using_cactus(identifier):
     params = {
         'cactus': identifier
     }
-    molecules = GirderClient().get('molecules/search', parameters=params)
+    res = GirderClient().get('molecules/search', parameters=params)
     # Just pick the first
-    if len(molecules) > 0:
-        return molecules[0]
+    if 'results' in res and len(res['results']) > 0:
+        return res['results'][0]
     else:
         return None
 
 def _find_molecule_using_girder(params):
-    molecules = GirderClient().get('molecules', parameters=params)
-    if len(molecules) > 0:
-        return molecules[0]
+    res = GirderClient().get('molecules', parameters=params)
+    if 'results' in res and len(res['results']) > 0:
+        return res['results'][0]
     else:
         return None
 
@@ -85,7 +88,7 @@ def _calculation_monitor(taskflow_ids):
 
     return table
 
-def import_structure(smiles=None, inchi=None, cjson=None):
+def import_structure(smiles=None, inchi=None, cjson=None, gen3d=True):
     # If the smiles begins with 'InChI=', then it is actually an inchi instead
     if smiles and smiles.startswith('InChI='):
         inchi = smiles
@@ -101,12 +104,13 @@ def import_structure(smiles=None, inchi=None, cjson=None):
     else:
         raise Exception('SMILES, InChI, or CJson must be provided')
 
+    params['generate3D'] = gen3d
     molecule = GirderClient().post('molecules', json=params)
 
     if not molecule:
         raise Exception('Molecule could not be imported with params', params)
 
-    return GirderMolecule(molecule['_id'], molecule['cjson'])
+    return GirderMolecule(molecule['_id'], molecule.get('cjson'))
 
 def find_molecule(identifier=None, inchi=None, smiles=None):
     molecule = _find_molecule(identifier, inchi, smiles)
@@ -203,10 +207,46 @@ def find_spectra(identifier, stype='IR', source='NIST'):
             'source' : source
     }
 
-    spectrum = GirderClient().get('experiments', parameters=params)
+    spectra = GirderClient().get('experiments', parameters=params)
     wavenumbers = [float(w) for w in spectrum['x'][1:-1].split()]
     intensities = [float(i) for i in spectrum['y'][1:-1].split()]
     max_intensity = max(intensities)
     intensities = [i / max_intensity for i in intensities]
+    return spectra
 
-    return intensities, wavenumbers
+def run_calculations(girder_molecules, image_name, input_parameters,
+                     input_geometries=None, run_parameters=None,
+                     force=False):
+    """Run multiple calculations in one taskflow
+
+    This will search for each calculation to see if it has already been
+    done. If it has been done, it will not run it unless force is true.
+    It will then submit all calculations that need to be submitted.
+
+    Parameters
+    ----------
+    girder_molecules : list of GirderMolecule
+        The list of molecules for which to run calculations
+    image_name : str
+        The name of the image to run the calculations on
+    input_paramters : dict
+        The input parameters for the taskflow
+    input_geometries: list of str
+        The input geometries of the molecules
+    run_paramters : dict
+        The run parameters for the taskflow
+    force : bool
+        Force all of the calculations to be performed, even if they
+        have already been run once.
+    """
+    molecule_ids = [x._id for x in girder_molecules]
+    calculations = _fetch_or_submit_calculations(molecule_ids, image_name,
+                                                 input_parameters,
+                                                 input_geometries,
+                                                 run_parameters, force)
+
+    results = []
+    for c, m in zip(calculations, molecule_ids):
+        results.append(_calculation_result(c, m))
+
+    return results
