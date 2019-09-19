@@ -36,11 +36,7 @@ class Visualization(ABC):
 
         try:
             if exp_spec is not None:
-                intensities, frequencies = exp_spec
-
-            exp_spec = {'intensities': intensities,
-                        'frequencies': frequencies}
-            self._provider.cjson['exp_vibrations'] = exp_spec
+                self._provider.cjson['exp_vibrations'] = exp_spec
 
             from ._notebook import CJSON
             return CJSON(self._provider.cjson, **self._params)
