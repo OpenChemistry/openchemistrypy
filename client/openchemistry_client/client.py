@@ -1,6 +1,7 @@
 import click
 from girder_client import GirderClient
 
+from . import calculations
 from . import molecules
 
 VERSION = '0.0.1'
@@ -30,6 +31,7 @@ def main(ctx, api_key, api_url):
 
 
 main.add_command(molecules.molecules)
+main.add_command(calculations.calculations)
 
 
 if __name__ == '__main__':
