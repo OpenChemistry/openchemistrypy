@@ -1,4 +1,3 @@
-
 import click
 from girder_client import GirderClient
 

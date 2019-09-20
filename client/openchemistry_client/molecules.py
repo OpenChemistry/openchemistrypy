@@ -1,4 +1,3 @@
-
 import click
 import json
 
@@ -11,13 +10,13 @@ _short_help = 'Perform operations on molecules'
 
 @click.group('molecules', short_help=_short_help, help='%s\n\n%s' % (
     _short_help,
-    _common_help.replace('LOCAL_FOLDER', 'LOCAL_FOLDER (default: ".")')))
+    _common_help))
 @click.pass_obj
 def molecules(gc):
     pass
 
 
-@molecules.command('list')
+@molecules.command('ls')
 @click.option('--limit', default=25, help='The results limit')
 @click.pass_obj
 def _list(gc, limit):
