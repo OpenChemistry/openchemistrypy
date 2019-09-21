@@ -1,0 +1,10 @@
+{
+  "molecule_id": "5d8611625930286c9c3d087f",
+  "image_name": "openchemistry/psi4:latest",
+  "input_parameters": {
+    "task": "energy",
+    "theory": "dft",
+    "functional": "b3lyp",
+    "basis": "6-31g"
+  }
+}
