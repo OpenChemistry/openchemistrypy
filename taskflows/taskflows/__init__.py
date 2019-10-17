@@ -9,6 +9,7 @@ from cumulus.tasks.job import submit_job, monitor_job
 from girder.api.rest import getCurrentUser
 from girder.constants import AccessType
 from girder.utility.model_importer import ModelImporter
+from girder_client import HttpError
 
 from jsonpath_rw import parse
 import os
@@ -103,8 +104,12 @@ def _get_oc_folder(client):
     private_folder_path =    'user/%s/Private' % login
     private_folder = client.resourceLookup(private_folder_path)
     oc_folder_path = '%s/oc' % private_folder_path
-    oc_folder = client.resourceLookup(oc_folder_path, test=True)
-    if oc_folder is None:
+    # girder_client.resourceLookup(...) no longer has a test parameter
+    # so we just assume that if resourceLookup(...) raises a HttpError
+    # then the resource doesn't exist.
+    try:
+        oc_folder = client.resourceLookup(oc_folder_path)
+    except HttpError:
         oc_folder = client.createFolder(private_folder['_id'], 'oc')
 
     return oc_folder
