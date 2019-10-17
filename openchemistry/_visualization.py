@@ -203,3 +203,40 @@ class Properties(Visualization):
             )
 
         return table
+
+class Geometries(Visualization):
+
+    def show(self, **kwargs):
+        geometries = self._provider.geometries
+        try:
+            from IPython.display import Markdown
+            table = self._md_table(geometries)
+            return Markdown(table)
+        except ImportError:
+            # Outside notebook print CJSON
+            print(geometries)
+
+    def data(self):
+        return self._provider.geometries
+
+    def _md_table(self, geometries):
+        import math
+        table = '''### Geometries
+| Id | Provenance | Energy |
+|----|------------|--------|'''
+
+        for geometry in geometries:
+            id = geometry.get('_id')
+            provenance = geometry.get('provenanceType')
+            try:
+                energy = float(geometry.get('energy', math.nan))
+            except ValueError:
+                energy = math.nan
+
+            table += '\n| %s | %s | %.2f |' % (
+                id,
+                provenance,
+                energy
+            )
+
+        return table

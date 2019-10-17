@@ -87,6 +87,11 @@ class MoleculeProvider(CjsonProvider):
         return self._svg_
 
     @property
+    def geometries(self):
+        resp = GirderClient().get('molecules/%s/geometries' % self._id)
+        return resp.get('results', [])
+
+    @property
     def url(self):
         return '%s/molecules/%s' % (GirderClient().app_url.rstrip('/'), self._id)
 
