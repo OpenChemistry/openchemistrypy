@@ -59,6 +59,9 @@ class GirderMolecule(Molecule):
         }
         GirderClient().patch('molecules/%s' % self._id, json=body)
 
+    def add_geometry(self, cjson):
+        GirderClient().post('molecules/%s/geometries' % self._id, json=cjson)
+
 class CalculationResult(Molecule):
 
     def __init__(self, _id=None, properties=None, molecule_id=None):
