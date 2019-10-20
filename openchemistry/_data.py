@@ -6,6 +6,8 @@ import avogadro
 from ._girder import GirderClient
 from ._utils import calculate_mo
 
+from girder_client import HttpError
+
 class DataProvider(ABC):
     @property
     @abstractmethod
@@ -85,6 +87,24 @@ class MoleculeProvider(CjsonProvider):
             self._svg_ = resp.content.decode('utf-8')
 
         return self._svg_
+
+    def geometry_cjson(self, geometry_id=None):
+        if geometry_id is None:
+            # Just return the molecule's default cjson
+            return self.cjson
+
+        try:
+            resp = GirderClient().get(
+                'molecules/%s/geometries/%s' % (self._id, geometry_id))
+        except HttpError as e:
+            if ('Invalid ObjectId' in e.responseText or
+                    'Geometry not found' in e.responseText):
+                print('Geometry ID not found')
+                return None
+
+            raise
+
+        return resp.get('cjson')
 
     @property
     def geometries(self):

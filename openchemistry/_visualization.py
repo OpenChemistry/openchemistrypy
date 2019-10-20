@@ -9,7 +9,7 @@ class Visualization(ABC):
         self._params = {}
 
     @abstractmethod
-    def show(self, viewer='moljs', spectrum=False, volume=False, isosurface=False, menu=True, mo=None, iso=None, transfer_function=None, mode=-1, play=False, alt=None):
+    def show(self, viewer='moljs', spectrum=False, volume=False, isosurface=False, menu=True, mo=None, iso=None, transfer_function=None, mode=-1, play=False, alt=None, geometry_id=None):
         self._params = {
             'moleculeRenderer': viewer,
             'showSpectrum': spectrum,
@@ -23,8 +23,14 @@ class Visualization(ABC):
             **self._transfer_function_to_params(transfer_function)
         }
 
+        if geometry_id is not None:
+            # Note: only a MoleculeProvider has this function...
+            cjson = self._provider.geometry_cjson(geometry_id)
+        else:
+            cjson = self._provider.cjson
+
         # Show SVG if 3D coords are not available
-        if not cjson_has_3d_coords(self._provider.cjson):
+        if not cjson_has_3d_coords(cjson):
             try:
                 from ._notebook import SVG
                 return SVG(self._provider.svg)
@@ -33,11 +39,11 @@ class Visualization(ABC):
 
         try:
             from ._notebook import CJSON
-            return CJSON(self._provider.cjson, **self._params)
+            return CJSON(cjson, **self._params)
         except ImportError:
             # Outside notebook print CJSON
             if alt is None:
-                print(self._provider.cjson)
+                print(cjson)
             else:
                 print(alt)
 
@@ -206,7 +212,12 @@ class Properties(Visualization):
 
 class Geometries(Visualization):
 
-    def show(self, **kwargs):
+    def show(self, geometry_id=None, **kwargs):
+        if geometry_id is not None:
+            # User requested a specific geometry. Show that.
+            return super(Geometries, self).show(geometry_id=geometry_id,
+                                                **kwargs)
+
         geometries = self._provider.geometries
         try:
             from IPython.display import Markdown
