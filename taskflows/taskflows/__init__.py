@@ -661,13 +661,19 @@ def postprocess_job(task, _, input_, cluster, image, run_parameters, root_folder
 
     task.taskflow.logger.info('Uploading the results of the calculation to the database.')
 
+    code = task.taskflow.get_metadata('code')
+    if isinstance(code, dict):
+        # Get the contents of "code" to set it below
+        code = code.get('code')
+
     for i, output_file in enumerate(output_files):
         body = {
             'fileId': output_file['_id'],
             'format': output_format,
             'public': True,
             'image': image, # image now also has a digest field, add it to the calculation
-            'scratchFolderId': scratch_folder_id
+            'scratchFolderId': scratch_folder_id,
+            'code': code
         }
 
         client.put('calculations/%s' % input_['calculations'][i], parameters=params, json=body)
