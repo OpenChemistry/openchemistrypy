@@ -126,13 +126,13 @@ class CalculationProvider(CachedDataProvider):
 
 class AvogadroProvider(CjsonProvider):
     def __init__(self, molecule):
+        super(AvogadroProvider, self).__init__(None)
         self._molecule = molecule
-        self._cjson = None
 
     @property
     def cjson(self):
-        if self._cjson is None:
+        if self._cjson_ is None:
             conv = avogadro.io.FileFormatManager()
             cjson_str = conv.write_string(self._molecule, 'cjson')
-            self._cjson = json.loads(cjson_str)
-        return self._cjson
+            self._cjson_ = json.loads(cjson_str)
+        return self._cjson_
