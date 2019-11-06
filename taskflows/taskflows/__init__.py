@@ -9,6 +9,7 @@ from cumulus.tasks.job import submit_job, monitor_job
 from girder.api.rest import getCurrentUser
 from girder.constants import AccessType
 from girder.utility.model_importer import ModelImporter
+from girder_client import HttpError
 
 from jsonpath_rw import parse
 import os
@@ -103,8 +104,12 @@ def _get_oc_folder(client):
     private_folder_path =    'user/%s/Private' % login
     private_folder = client.resourceLookup(private_folder_path)
     oc_folder_path = '%s/oc' % private_folder_path
-    oc_folder = client.resourceLookup(oc_folder_path, test=True)
-    if oc_folder is None:
+    # girder_client.resourceLookup(...) no longer has a test parameter
+    # so we just assume that if resourceLookup(...) raises a HttpError
+    # then the resource doesn't exist.
+    try:
+        oc_folder = client.resourceLookup(oc_folder_path)
+    except HttpError:
         oc_folder = client.createFolder(private_folder['_id'], 'oc')
 
     return oc_folder
@@ -664,13 +669,19 @@ def postprocess_job(task, _, input_, cluster, image, run_parameters, root_folder
 
     task.taskflow.logger.info('Uploading the results of the calculation to the database.')
 
+    code = task.taskflow.get_metadata('code')
+    if isinstance(code, dict):
+        # Get the contents of "code" to set it below
+        code = code.get('code')
+
     for i, output_file in enumerate(output_files):
         body = {
             'fileId': output_file['_id'],
             'format': output_format,
             'public': True,
             'image': image, # image now also has a digest field, add it to the calculation
-            'scratchFolderId': scratch_folder_id
+            'scratchFolderId': scratch_folder_id,
+            'code': code
         }
 
         client.put('calculations/%s' % input_['calculations'][i], parameters=params, json=body)

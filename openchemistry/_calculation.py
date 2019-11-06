@@ -1,6 +1,9 @@
 import os
 import inspect
+import json
 from jsonpath_rw import parse
+import urllib
+import urllib.parse
 
 from girder_client import HttpError
 
@@ -134,9 +137,10 @@ class PendingCalculationResultWrapper(AttributeInterceptor):
 
 def _fetch_calculation(molecule_id, image_name, input_parameters, geometry_id=None):
     repository, tag = parse_image_name(image_name)
+    input_params_quoted = urllib.parse.quote(json.dumps(input_parameters))
     parameters = {
         'moleculeId': molecule_id,
-        'inputParametersHash': hash_object(input_parameters),
+        'inputParameters': input_params_quoted,
         'imageName': '%s:%s' % (repository, tag)
     }
 
