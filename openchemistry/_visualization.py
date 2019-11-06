@@ -9,7 +9,10 @@ class Visualization(ABC):
         self._params = {}
 
     @abstractmethod
-    def show(self, viewer='moljs', spectrum=False, volume=False, isosurface=False, menu=True, mo=None, iso=None, transfer_function=None, mode=-1, play=False, alt=None, geometry_id=None):
+    def show(self, viewer='moljs', spectrum=False, volume=False,
+             isosurface=False, menu=True, mo=None, iso=None,
+             transfer_function=None, mode=-1, play=False, alt=None,
+             geometry_id=None, exp_spec=None):
         self._params = {
             'moleculeRenderer': viewer,
             'showSpectrum': spectrum,
@@ -38,8 +41,13 @@ class Visualization(ABC):
                 print(self._provider.svg)
 
         try:
+            if exp_spec is not None:
+                self._provider.cjson['exp_vibrations'] = exp_spec
+
             from ._notebook import CJSON
+
             return CJSON(cjson, **self._params)
+
         except ImportError:
             # Outside notebook print CJSON
             if alt is None:
@@ -114,8 +122,17 @@ class Structure(Visualization):
 
 class Vibrations(Visualization):
 
-    def show(self, viewer='moljs', spectrum=True, menu=True, mode=-1, play=True, **kwargs):
-        return super(Vibrations, self).show(viewer=viewer, spectrum=spectrum, menu=menu, mode=mode, play=play, **kwargs)
+    def show(self, viewer='moljs', spectrum=True, menu=True, mode=-1,
+             play=True, experimental=False, **kwargs):
+
+        if experimental:
+            from .api import find_spectra
+            identifier = self._provider._molecule_id
+            exp_spec = find_spectra(identifier, stype='IR', source='NIST')
+            kwargs['exp_spec'] = exp_spec
+
+        return super(Vibrations, self).show(viewer=viewer, spectrum=spectrum,
+                menu=menu, mode=mode, play=play, **kwargs)
 
     def data(self):
         return self._provider.vibrations
