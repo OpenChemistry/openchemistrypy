@@ -1,4 +1,6 @@
-from ._visualization import Structure, Orbitals, Properties, Vibrations
+from ._visualization import (
+    Structure, Orbitals, Properties, Vibrations, Geometries
+)
 
 class Molecule(object):
     def __init__(self, provider):
@@ -7,7 +9,8 @@ class Molecule(object):
             'structure': None,
             'orbitals': None,
             'properties': None,
-            'vibrations': None
+            'vibrations': None,
+            'geometries': None
         }
 
     @property
@@ -33,3 +36,9 @@ class Molecule(object):
         if self._visualizations['vibrations'] is None:
             self._visualizations['vibrations'] = Vibrations(self._provider)
         return self._visualizations['vibrations']
+
+    @property
+    def geometries(self):
+        if self._visualizations['geometries'] is None:
+            self._visualizations['geometries'] = Geometries(self._provider)
+        return self._visualizations['geometries']
