@@ -147,3 +147,11 @@ def cjson_has_3d_coords(cjson):
 def mol_has_3d_coords(mol):
     # This functions properly if passed None
     return cjson_has_3d_coords(mol.get('cjson'))
+
+def get_oc_token_obj():
+    import base64
+    try:
+        obj_str = base64.b64decode(os.environ.get('OC_TOKEN'))
+        return json.loads(obj_str)
+    except (TypeError, json.JSONDecodeError, Exception):
+        return {}

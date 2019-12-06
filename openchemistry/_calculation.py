@@ -8,6 +8,8 @@ import urllib.parse
 from girder_client import HttpError
 
 from ._girder import GirderClient
+from ._jupyterhub import JupyterHub
+from ._cluster import Cluster
 from ._molecule import Molecule
 from ._data import MoleculeProvider, CalculationProvider
 from ._utils import (
@@ -122,7 +124,7 @@ class PendingCalculationResultWrapper(AttributeInterceptor):
             table = CalculationMonitor({
                 'taskFlowIds': [taskflow_id],
                 'girderToken': GirderClient().token,
-                'girderApiUrl': GirderClient().api_url
+                'girderApiUrl': GirderClient().url
             })
         except ImportError:
             # Outside notebook just print message
@@ -226,8 +228,8 @@ def _create_pending_calculation(molecule_id, image_name, input_parameters, geome
     repository, tag = parse_image_name(image_name)
 
     notebooks = []
-    if GirderClient().file is not None:
-        notebooks.append(GirderClient().file['_id'])
+    if JupyterHub().file is not None:
+        notebooks.append(JupyterHub().file['_id'])
 
     body = {
         'moleculeId': molecule_id,
@@ -282,8 +284,8 @@ def _fetch_or_submit_calculations(molecule_ids, image_name, input_parameters,
         else:
             # If we already have a calculation tag it with this notebooks id
             notebooks = calculation.setdefault('notebooks', [])
-            if GirderClient().file is not None:
-                notebooks.append(GirderClient().file['_id'])
+            if JupyterHub().file is not None:
+                notebooks.append(JupyterHub().file['_id'])
 
             body = {
                 'notebooks': notebooks
@@ -296,7 +298,7 @@ def _fetch_or_submit_calculations(molecule_ids, image_name, input_parameters,
 
     if len(pending_calculations) != 0:
         calc_ids = [x['_id'] for x in pending_calculations]
-        taskflow_id = _submit_calculations(GirderClient().cluster_id, calc_ids,
+        taskflow_id = _submit_calculations(Cluster().id, calc_ids,
                                            image_name, run_parameters)
 
         for i, calculation in enumerate(pending_calculations):
