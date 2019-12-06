@@ -13,7 +13,8 @@ from ._cluster import Cluster
 from ._molecule import Molecule
 from ._data import MoleculeProvider, CalculationProvider
 from ._utils import (
-    fetch_or_create_queue, hash_object, parse_image_name, mol_has_3d_coords
+    fetch_or_create_queue, hash_object, parse_image_name, mol_has_3d_coords,
+    get_oc_token_obj
 )
 
 class GirderMolecule(Molecule):
@@ -156,7 +157,10 @@ def _fetch_calculation(molecule_id, image_name, input_parameters, geometry_id=No
     return res['results'][0]
 
 def _nersc():
-    return os.environ.get('OC_SITE') == 'NERSC'
+    oc_token_obj = get_oc_token_obj()
+    site = oc_token_obj.get('site')
+    site = os.environ.get('OC_SITE', site)
+    return site == 'NERSC'
 
 def _submit_calculations(cluster_id, pending_calculation_ids, image_name,
                          run_parameters):
