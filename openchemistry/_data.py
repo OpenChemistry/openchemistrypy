@@ -80,6 +80,24 @@ class MoleculeProvider(CjsonProvider):
         self._svg_ = None
 
     @property
+    def cjson(self):
+        if self._cjson_ is None:
+            # Try to update the cjson
+            try:
+                resp = GirderClient().get('molecules/%s/cjson' % self._id)
+            except HttpError as e:
+                fail_str = 'Molecule does not have 3D coordinates.'
+                if fail_str in e.responseText:
+                    # No 3D coordinates...
+                    return None
+
+                raise
+
+            self._cjson_ = resp
+
+        return self._cjson_
+
+    @property
     def svg(self):
         if self._svg_ is None:
             resp = GirderClient().get('molecules/%s/svg' % self._id,
