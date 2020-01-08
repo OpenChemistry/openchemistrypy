@@ -88,13 +88,12 @@ def _calculation_monitor(taskflow_ids):
 
     return table
 
-def import_structure(smiles=None, inchi=None, cjson=None, gen3d=True):
+def import_structure(smiles=None, inchi=None, cjson=None, gen3d=True, params={}):
     # If the smiles begins with 'InChI=', then it is actually an inchi instead
     if smiles and smiles.startswith('InChI='):
         inchi = smiles
         smiles = None
 
-    params = {}
     if smiles:
         params['smiles'] = smiles
     elif inchi:
