@@ -399,7 +399,7 @@ def setup_input(task, input_, cluster, image, run_parameters, root_folder, conta
             raise Exception('Failed to get molecule in format: ' + input_format)
 
         if input_format == 'cjson':
-            geometry_data.append(r.json())
+            geometry_data.append(json.dumps(r.json()))
         else:
             geometry_data.append(r.content.decode('utf-8'))
 
