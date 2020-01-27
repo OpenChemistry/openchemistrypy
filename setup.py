@@ -51,7 +51,8 @@ setup(
         'jsonpath-rw',
         'avogadro>=1.92.1',
         'IPython',
-        'ipykernel'
+        'ipykernel',
+        'rmsd'
     ],
 
     extras_require={
