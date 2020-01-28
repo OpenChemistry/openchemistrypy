@@ -150,7 +150,7 @@ def mol_has_3d_coords(mol):
     # This functions properly if passed None
     return cjson_has_3d_coords(mol.get('cjson'))
 
-def calculate_rmsd(mol_id1, mol_id2=None, geometry_id1=None, geometry_id2=None,
+def calculate_rmsd(mol_id, geometry_id1=None, geometry_id2=None,
                    heavy_atoms_only=False):
 
     # These cause circular import errors if we put them at the top of the file
@@ -158,26 +158,20 @@ def calculate_rmsd(mol_id1, mol_id2=None, geometry_id1=None, geometry_id2=None,
     from ._calculation import GirderMolecule
 
     # Allow the user to pass in a GirderMolecule instead of an id
-    if isinstance(mol_id1, GirderMolecule):
-        mol_id1 = mol_id1._id
-    if isinstance(mol_id2, GirderMolecule):
-        mol_id2 = mol_id2._id
-
-    if mol_id2 is None:
-        # Assume we are comparing different geometries
-        mol_id2 = mol_id1
+    if isinstance(mol_id, GirderMolecule):
+        mol_id = mol_id._id
 
     if geometry_id1 is None:
-        cjson1 = GirderClient().get('/molecules/%s/cjson' % mol_id1)
+        cjson1 = GirderClient().get('/molecules/%s/cjson' % mol_id)
     else:
         cjson1 = GirderClient().get('/molecules/%s/geometries/%s/cjson' %
-                                    (mol_id1, geometry_id1))
+                                    (mol_id, geometry_id1))
 
     if geometry_id2 is None:
-        cjson2 = GirderClient().get('/molecules/%s/cjson' % mol_id2)
+        cjson2 = GirderClient().get('/molecules/%s/cjson' % mol_id)
     else:
         cjson2 = GirderClient().get('/molecules/%s/geometries/%s/cjson' %
-                                    (mol_id2, geometry_id2))
+                                    (mol_id, geometry_id2))
 
     coords1 = cjson1['atoms']['coords']['3d']
     coords1_triplets = zip(coords1[0::3], coords1[1::3], coords1[2::3])
