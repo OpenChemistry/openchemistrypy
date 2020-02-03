@@ -75,9 +75,22 @@ class CalculationResult(Molecule):
         self._id = _id
         self._properties = properties
         self._molecule_id = molecule_id
+        self._optimized_geometry_id = None
 
     def data(self):
         return self._provider.cjson
+
+    @property
+    def optimized_geometry_id(self):
+        if not self._optimized_geometry_id:
+            # Try to get it...
+            result = GirderClient().get('calculations/%s' % self._id)
+            if 'optimizedGeometryId' in result:
+                self._optimized_geometry_id = result['optimizedGeometryId']
+            else:
+                print('None')
+
+        return self._optimized_geometry_id
 
     @property
     def frequencies(self):

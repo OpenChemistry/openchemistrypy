@@ -81,6 +81,14 @@ class MoleculeProvider(CjsonProvider):
         self._svg_ = None
 
     @property
+    def cjson(self):
+        if self._cjson_ is None:
+            # Try to update the cjson
+            self._cjson_ = GirderClient().get('molecules/%s/cjson' % self._id)
+
+        return self._cjson_
+
+    @property
     def svg(self):
         if self._svg_ is None:
             resp = GirderClient().get('molecules/%s/svg' % self._id,

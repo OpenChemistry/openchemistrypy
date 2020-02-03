@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 import urllib.parse
 
+from ._girder import GirderClient
 from ._utils import hash_object, camel_to_space, cjson_has_3d_coords
 
 class Visualization(ABC):
@@ -119,6 +120,22 @@ class Structure(Visualization):
 
     def data(self):
         return self._provider.cjson
+
+    def generate_3d(self, forcefield='mmff94', steps=100):
+        if cjson_has_3d_coords(self._provider.cjson):
+            raise Exception('Molecule already has 3D coordinates')
+
+        id = self._provider._id
+        params = {
+            'gen3dForcefield': forcefield,
+            'gen3dSteps': steps
+        }
+
+        GirderClient().post('/molecules/%s/3d' % id, parameters=params)
+        print('Generating 3D coordinates...')
+
+        # Remove the cjson so it will update
+        self._provider._cjson_ = None
 
 class Vibrations(Visualization):
 
