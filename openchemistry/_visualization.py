@@ -123,7 +123,8 @@ class Structure(Visualization):
 
     def generate_3d(self, forcefield='mmff94', steps=100):
         if cjson_has_3d_coords(self._provider.cjson):
-            raise Exception('Molecule already has 3D coordinates')
+            print('Molecule already has 3D coordinates')
+            return
 
         id = self._provider._id
         params = {
