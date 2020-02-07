@@ -236,12 +236,19 @@ def run_calculations(girder_molecules, image_name, input_parameters,
         The input parameters for the taskflow
     input_geometries: list of str
         The input geometries of the molecules
-    run_paramters : dict
+    run_parameters : dict
         The run parameters for the taskflow
     force : bool
         Force all of the calculations to be performed, even if they
         have already been run once.
     """
+    if (not isinstance(input_parameters, dict) or
+            'task' not in input_parameters):
+        print('Warning: no task was specified in "input_parameters"',
+              'for oc.run_calculations().')
+        print('The default task for the image (usually "energy") will be',
+              'performed.')
+
     molecule_ids = [x._id for x in girder_molecules]
     calculations = _fetch_or_submit_calculations(molecule_ids, image_name,
                                                  input_parameters,
