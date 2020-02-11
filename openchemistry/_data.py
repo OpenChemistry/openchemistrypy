@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 import json
 import collections
 import avogadro
+import requests
 
 from ._girder import GirderClient
 from ._utils import calculate_mo
@@ -148,8 +149,13 @@ class CalculationProvider(CachedDataProvider):
     def load_orbital(self, mo):
         cube = super(CalculationProvider, self)._get_cached_volume(mo)
         if cube is None:
-            cube = GirderClient().get('calculations/%s/cube/%s' % (self._id, mo))['cube']
-            super(CalculationProvider, self)._set_cached_volume(mo, cube)
+            try:
+                cube = GirderClient().get('calculations/%s/cube/%s' % (self._id, mo))['cube']
+                super(CalculationProvider, self)._set_cached_volume(mo, cube)
+            except requests.HTTPError:
+                import warnings
+                warnings.warn("No molecular orbital data was found for this calculation.")
+                return
         cjson = self.cjson
         cjson['cube'] = cube
 
