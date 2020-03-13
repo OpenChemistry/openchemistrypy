@@ -11,6 +11,8 @@ from girder.constants import AccessType
 from girder.utility.model_importer import ModelImporter
 from girder_client import HttpError
 
+from .utils import get_cori, image_to_sif, log_and_raise, log_std_err
+
 from jsonpath_rw import parse
 import os
 import datetime
@@ -74,30 +76,6 @@ class OpenChemistryTaskFlow(TaskFlow):
             start.s(input_, user, cluster, image, run_parameters),
             *args, **kwargs)
 
-def _image_to_sif(image_str):
-    return os.path.join('~', '.oc', 'singularity', image_str + '.sif')
-
-def _get_cori(client):
-    params = {
-        'type': 'newt'
-    }
-    clusters = client.get('clusters', parameters=params)
-    for cluster in clusters:
-        if cluster['name'] == 'cori':
-            return cluster
-
-    # We need to create one
-    body = {
-        'config': {
-            'host': 'cori'
-        },
-        'name': 'cori',
-        'type': 'newt'
-    }
-    cluster = client.post('clusters', data=json.dumps(body))
-
-    return cluster
-
 def _get_oc_folder(client):
     me = client.get('user/me')
     if me is None:
@@ -146,10 +124,10 @@ def start(task, input_, user, cluster, image, run_parameters):
         task.taskflow.girder_api_url, task.taskflow.girder_token)
 
     if cluster.get('name') == 'cori':
-        cluster = _get_cori(client)
+        cluster = get_cori(client)
 
     if '_id' not in cluster:
-        _log_and_raise(task, 'Invalid cluster configurations: %s' % cluster)
+        log_and_raise(task, 'Invalid cluster configurations: %s' % cluster)
 
     oc_folder = _get_oc_folder(client)
     root_folder = client.createFolder(oc_folder['_id'],
@@ -235,7 +213,7 @@ def _create_description_job(task, cluster, description_folder, image, run_parame
     image_name = '%s:%s' % (repository, tag)
     if container == 'singularity':
         # Include the path to the singularity dir, and the extension
-        image_name = _image_to_sif(image_name)
+        image_name = image_to_sif(image_name)
 
     commands = setup_commands + [
         'IMAGE_NAME=%s' % image_name,
@@ -288,13 +266,13 @@ def postprocess_description(task, _, input_, user, cluster, image, run_parameter
         if item['name'] == 'description.json':
             files = list(client.listFile(item['_id']))
             if len(files) != 1:
-                _log_std_err(task, client, description_folder)
-                _log_and_raise(task, 'Expecting a single file under item, found: %s' % len(files))
+                log_std_err(task, client, description_folder)
+                log_and_raise(task, 'Expecting a single file under item, found: %s' % len(files))
             description_file = files[0]
 
     if description_file is None:
-        _log_std_err(task, client, description_folder)
-        _log_and_raise(task, 'The container does not implement correctly the --description flag')
+        log_std_err(task, client, description_folder)
+        log_and_raise(task, 'The container does not implement correctly the --description flag')
 
     with client.session() as session:
         # If we have a NEWT session id we need set as a cookie so the redirect
@@ -329,14 +307,14 @@ def setup_input(task, input_, cluster, image, run_parameters, root_folder, conta
         task.taskflow.girder_api_url, task.taskflow.girder_token)
 
     if cluster.get('name') == 'cori':
-        cluster = _get_cori(client)
+        cluster = get_cori(client)
 
     if '_id' not in cluster:
-        _log_and_raise(task, 'Invalid cluster configurations: %s' % cluster)
+        log_and_raise(task, 'Invalid cluster configurations: %s' % cluster)
 
     calculation_ids = parse('calculations').find(input_)
     if not calculation_ids:
-        _log_and_raise(task, 'Unable to extract calculation ids.')
+        log_and_raise(task, 'Unable to extract calculation ids.')
 
     calculation_ids = calculation_ids[0].value
     calculations = [client.get('calculations/%s' % x) for x in calculation_ids]
@@ -351,7 +329,7 @@ def setup_input(task, input_, cluster, image, run_parameters, root_folder, conta
     if not all(x == input_parameters[0] for x in input_parameters):
         msg = ('For running multiple calculations, all input parameters must '
                'currently be identical')
-        _log_and_raise(task, msg)
+        log_and_raise(task, msg)
 
     input_parameters = input_parameters[0]
 
@@ -490,7 +468,7 @@ def _create_job(task, input_, cluster, image, run_parameters, container_descript
 
     if container == 'singularity':
         # Include the path to the singularity dir, and the extension
-        image_str = _image_to_sif(image_str)
+        image_str = image_to_sif(image_str)
 
     if container != 'shifter':
         commands.append('%s run %s %s %s' % (
@@ -539,34 +517,6 @@ def _nersc(cluster):
 
 def _demo(cluster):
     return cluster.get('name') == 'demo_cluster'
-
-def _log_and_raise(task, msg):
-    _log_error(task, msg)
-    raise Exception(msg)
-
-def _log_error(task, msg):
-    task.taskflow.logger.error(msg)
-
-def _log_std_err(task, client, run_folder):
-    errors = _get_std_err(client, run_folder)
-    for e in errors:
-        _log_error(task, e)
-
-def _get_std_err(client, run_folder):
-    error_regex = re.compile(r'^.*\.e\d*$', re.IGNORECASE)
-    output_items = list(client.listItem(run_folder['_id']))
-    errors = []
-    for item in output_items:
-        if error_regex.match(item['name']):
-            files = list(client.listFile(item['_id']))
-            if len(files) != 1:
-                continue
-            with tempfile.TemporaryFile() as tf:
-                client.downloadFile(files[0]['_id'], tf)
-                tf.seek(0)
-                contents = tf.read().decode()
-                errors.append(contents)
-    return errors
 
 @cumulus.taskflow.task
 def submit_calculation(task, input_, cluster, image, run_parameters, root_folder, container_description, input_folder, output_folder, scratch_folder, run_folder):
@@ -623,15 +573,15 @@ def postprocess_job(task, _, input_, cluster, image, run_parameters, root_folder
             if item['name'] == 'output_' + str(i + 1) + '.%s' % output_format:
                 files = list(client.listFile(item['_id']))
                 if len(files) != 1:
-                    _log_std_err(task, client, run_folder)
-                    _log_and_raise(task, 'Expecting a single file under item, found: %s' % len(files))
+                    log_std_err(task, client, run_folder)
+                    log_and_raise(task, 'Expecting a single file under item, found: %s' % len(files))
                 output_file = files[0]
                 break
 
         if output_file is None:
             # Log the job stderr
-            _log_std_err(task, client, run_folder)
-            _log_and_raise(task, 'The calculation did not produce any output file.')
+            log_std_err(task, client, run_folder)
+            log_and_raise(task, 'The calculation did not produce any output file.')
 
         output_files.append(output_file)
 
