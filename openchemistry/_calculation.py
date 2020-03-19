@@ -210,8 +210,28 @@ def _fetch_taskflow_status(taskflow_id):
 
     return r['status']
 
+def _ensure_image_on_server(repository, tag, container='docker', digest=None):
+    params = {
+      'repository': repository,
+      'tag': tag
+    }
+
+    if digest is not None:
+        params['digest'] = digest
+
+    r = GirderClient().get('images', params)
+    images = r['results']
+    if len(images) < 1:
+        raise Exception('Image not found on the server')
+
+    if container not in images[0]:
+        raise Exception('Container type not found in image')
+
 def _create_pending_calculation(molecule_id, image_name, input_parameters, geometry_id=None):
     repository, tag = parse_image_name(image_name)
+
+    # Verify that the image is on the server before going any further
+    _ensure_image_on_server(repository, tag)
 
     notebooks = []
     if GirderClient().file is not None:

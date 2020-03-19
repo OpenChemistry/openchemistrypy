@@ -9,6 +9,10 @@ def sif_dir():
     return '$HOME/.oc/singularity'
 
 
+def digest_to_sif(digest):
+    return os.path.join(sif_dir(), digest + '.sif')
+
+
 def image_to_sif(image_str):
     # Let's remove special characters from the image string
     name = '%s.sif' % re.sub('[^a-zA-Z0-9]', '_', image_str)
@@ -52,9 +56,9 @@ def log_error(task, msg):
 
 
 def log_std_err(task, client, run_folder):
-    errors = _get_std_err(client, run_folder)
+    errors = get_std_err(client, run_folder)
     for e in errors:
-        _log_error(task, e)
+        log_error(task, e)
 
 
 def get_std_err(client, run_folder):
@@ -72,3 +76,23 @@ def get_std_err(client, run_folder):
                 contents = tf.read().decode()
                 errors.append(contents)
     return errors
+
+
+def get_oc_folder(client):
+    me = client.get('user/me')
+    if me is None:
+        raise Exception('Unable to get me.')
+
+    login = me['login']
+    private_folder_path = 'user/%s/Private' % login
+    private_folder = client.resourceLookup(private_folder_path)
+    oc_folder_path = '%s/oc' % private_folder_path
+    # girder_client.resourceLookup(...) no longer has a test parameter
+    # so we just assume that if resourceLookup(...) raises a HttpError
+    # then the resource doesn't exist.
+    try:
+        oc_folder = client.resourceLookup(oc_folder_path)
+    except HttpError:
+        oc_folder = client.createFolder(private_folder['_id'], 'oc')
+
+    return oc_folder

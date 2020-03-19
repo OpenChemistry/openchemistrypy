@@ -11,7 +11,9 @@ from girder.constants import AccessType
 from girder.utility.model_importer import ModelImporter
 from girder_client import HttpError
 
-from .utils import get_cori, image_to_sif, log_and_raise, log_std_err
+from .utils import (
+    digest_to_sif, get_cori, get_oc_folder, log_and_raise, log_std_err
+)
 
 from jsonpath_rw import parse
 import os
@@ -40,7 +42,7 @@ class OpenChemistryTaskFlow(TaskFlow):
             'tag': <the image tag, e.g. "latest">
         },
         "runParameters": {
-            'container': <the container technology to be used: docker | singularity>,
+            'container': <the container technology to be used: docker | singularity | shifter>,
             'keepScratch': <whether to save the raw output of the calculations: default False>
         }
     }
@@ -76,25 +78,6 @@ class OpenChemistryTaskFlow(TaskFlow):
             start.s(input_, user, cluster, image, run_parameters),
             *args, **kwargs)
 
-def _get_oc_folder(client):
-    me = client.get('user/me')
-    if me is None:
-        raise Exception('Unable to get me.')
-
-    login = me['login']
-    private_folder_path =    'user/%s/Private' % login
-    private_folder = client.resourceLookup(private_folder_path)
-    oc_folder_path = '%s/oc' % private_folder_path
-    # girder_client.resourceLookup(...) no longer has a test parameter
-    # so we just assume that if resourceLookup(...) raises a HttpError
-    # then the resource doesn't exist.
-    try:
-        oc_folder = client.resourceLookup(oc_folder_path)
-    except HttpError:
-        oc_folder = client.createFolder(private_folder['_id'], 'oc')
-
-    return oc_folder
-
 def _countdown(cluster):
     """
     Returns the number of seconds the monitoring task should be delayed before
@@ -129,7 +112,7 @@ def start(task, input_, user, cluster, image, run_parameters):
     if '_id' not in cluster:
         log_and_raise(task, 'Invalid cluster configurations: %s' % cluster)
 
-    oc_folder = _get_oc_folder(client)
+    oc_folder = get_oc_folder(client)
     root_folder = client.createFolder(oc_folder['_id'],
                                     datetime.datetime.now().strftime("%Y_%m_%d-%H_%M_%f"))
     # temporary folder to save the container in/out description
@@ -163,6 +146,9 @@ def _get_job_parameters(task, cluster, image, run_parameters):
         'taskFlowId': task.taskflow.id
     }
 
+    if digest is None:
+        digest = _get_digest(task, repository, tag)
+
     # Override default parameters depending on the cluster we are running on
 
     if _nersc(cluster):
@@ -195,13 +181,18 @@ def _get_job_parameters(task, cluster, image, run_parameters):
         'jobParameters': job_parameters
     }
 
+
 def _create_description_job(task, cluster, description_folder, image, run_parameters):
     params = _get_job_parameters(task, cluster, image, run_parameters)
     container = params['container']
     setup_commands = params['setupCommands']
     repository = params['repository']
     tag = params['tag']
+    digest = params['digest']
     job_parameters = params['jobParameters'];
+
+    # Make sure the image exists on the server before we go further
+    _ensure_image_on_server(task, repository, tag, digest, container)
 
     output_file = 'description.json'
 
@@ -212,8 +203,7 @@ def _create_description_job(task, cluster, description_folder, image, run_parame
 
     image_name = '%s:%s' % (repository, tag)
     if container == 'singularity':
-        # Include the path to the singularity dir, and the extension
-        image_name = image_to_sif(image_name)
+        image_name = digest_to_sif(digest)
 
     commands = setup_commands + [
         'IMAGE_NAME=%s' % image_name,
@@ -468,7 +458,7 @@ def _create_job(task, input_, cluster, image, run_parameters, container_descript
 
     if container == 'singularity':
         # Include the path to the singularity dir, and the extension
-        image_str = image_to_sif(image_str)
+        image_str = digest_to_sif(digest)
 
     if container != 'shifter':
         commands.append('%s run %s %s %s' % (
@@ -613,3 +603,37 @@ def postprocess_job(task, _, input_, cluster, image, run_parameters, root_folder
         client.put('calculations/%s' % input_['calculations'][i], parameters=params, json=body)
 
     task.taskflow.logger.log(STATUS_LEVEL, 'Done!')
+
+
+def _ensure_image_on_server(task, repository, tag, digest, container='docker'):
+    client = create_girder_client(
+        task.taskflow.girder_api_url, task.taskflow.girder_token)
+    params = {
+      'repository': repository,
+      'tag': tag,
+      'digest': digest
+    }
+    r = client.get('images', params)
+    images = r['results']
+    if len(images) < 1:
+        log_and_raise(task, 'Image not found on the server.')
+
+    if container not in images[0]:
+        msg = 'Image does not have container type: ' + container
+        log_and_raise(task, msg)
+
+
+def _get_digest(task, repository, tag):
+    client = create_girder_client(
+        task.taskflow.girder_api_url, task.taskflow.girder_token)
+    params = {
+      'repository': repository,
+      'tag': tag
+    }
+    r = client.get('images', params)
+    images = r['results']
+    if len(images) < 1:
+        log_and_raise(task, 'Image not found on the server.')
+
+    # The digest should definitely be here
+    return images[0]['digest']

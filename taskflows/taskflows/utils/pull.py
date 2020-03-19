@@ -1,6 +1,7 @@
 import json
 import argparse
 import subprocess
+from subprocess import PIPE
 import os
 import errno
 try:
@@ -10,6 +11,7 @@ except ImportError:
 
 reg_base_url = 'https://registry-1.docker.io/v2'
 reg_auth_base_url = 'https://auth.docker.io'
+
 
 def ensure_singularity_dir():
     home = os.path.expanduser("~")
@@ -36,35 +38,54 @@ def singularity(repo, digest):
         docker_uri  = 'docker://%s' % image_name
         subprocess.check_call(['singularity', 'build', container_path, docker_uri])
 
-    return container_path
+    size = os.path.getsize(container_path)
+    return container_path, size
+
 
 def docker(repo, digest):
     image_name = '%s@%s' % (repo, digest)
     subprocess.check_call(['docker', 'pull', image_name])
+    size_args = ['docker', 'inspect', image_name, '--format="{{.Size}}"']
+    p = subprocess.Popen(size_args, stdin=PIPE, stdout=PIPE, stderr=PIPE)
+    output, err = p.communicate()
+    rc = p.returncode
+    if rc != 0:
+       raise Exception('docker inspect failed')
 
-    return image_name
+    size = int(output.decode('utf-8').strip().replace('"', ''))
+
+    return image_name, size
+
 
 def shifter(repo, tag):
     image_name = '%s:%s' % (repo, tag)
     subprocess.check_call(['shifterimg', 'pull', image_name])
 
-    return image_name
+    # FIXME: implement a way to get the shifter image size
+    # I am currently not aware of one, and don't have access to NERSC
+    size = 0
 
-def write_descriptor(repo, tag, digest, image_uri):
+    return image_name, size
+
+
+def write_descriptor(repo, tag, digest, image_uri, size):
     des = {
         'repository': repo,
         'tag': tag,
         'digest': digest,
-        'imageUri': image_uri
+        'imageUri': image_uri,
+        'size': size
     }
 
     with open('pull.json', 'w') as fp:
         json.dump(des, fp)
 
+
 def authenticate(repo):
     resp = urlopen('%s/token?service=registry.docker.io&scope=repository:%s:pull' % (reg_auth_base_url, repo)).read()
 
     return json.loads(resp)['token']
+
 
 def fetch_digest(repo, tag, token):
     req = Request('%s/%s/manifests/%s' % (reg_base_url, repo, tag))
@@ -73,6 +94,7 @@ def fetch_digest(repo, tag, token):
     resp = urlopen(req)
 
     return resp.info().get('Docker-Content-Digest')
+
 
 def main():
     parser = argparse.ArgumentParser(description='Pull image from container registry.')
@@ -90,15 +112,16 @@ def main():
     digest = fetch_digest(repo, tag, token)
 
     if container == 'singularity':
-        image_uri = singularity(repo, digest)
+        image_uri, size = singularity(repo, digest)
     elif container == 'shifter':
-        image_uri = shifter(repo, tag)
+        image_uri, size = shifter(repo, tag)
     else:
-        image_uri = docker(repo, digest)
+        image_uri, size = docker(repo, digest)
 
-    write_descriptor(repo, tag, digest, image_uri)
+    write_descriptor(repo, tag, digest, image_uri, size)
 
     print(image_uri)
+
 
 if __name__ == "__main__":
     main()
