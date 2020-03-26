@@ -24,27 +24,31 @@ import os
 import re
 
 STATUS_LEVEL = logging.INFO + 5
-OUTPUT_FILE = 'pull.json'
+PYTHON_FILE = 'list.py'
+OUTPUT_FILE = 'list.json'
 
+# Only these repositories will be registered automatically
+REPOSITORIES_TO_REGISTER = [
+    'openchemistry/chemml',
+    'openchemistry/cp2k',
+    'openchemistry/nwchem',
+    'openchemistry/psi4',
+    'openchemistry/torchani'
+]
 
-class ContainerPullTaskFlow(TaskFlow):
+class ContainerListTaskFlow(TaskFlow):
     """
     {
         "cluster": {
             "_id": <id of cluster to run on>
         },
-        "image": {
-            'repository': <the image repository, e.g. "openchemistry/psi4">
-            'tag': <the image tag, e.g. "latest">
-        },
-        'container': <container technology to be used: docker | singularity>
+        'container': <container technology to be used: docker | singularity | shifter>
     }
     """
 
     def start(self, *args, **kwargs):
         user = getCurrentUser()
         cluster = kwargs.get('cluster')
-        image = kwargs.get('image')
         container = kwargs.get('container')
 
         if cluster is None:
@@ -52,9 +56,6 @@ class ContainerPullTaskFlow(TaskFlow):
 
         if '_id' not in cluster and 'name' not in cluster:
             raise Exception('Unable to extract cluster.')
-
-        if image is None:
-            raise Exception('Unable to extract the image name.')
 
         if container is None:
             raise Exception('Unable to extract container type.')
@@ -65,15 +66,12 @@ class ContainerPullTaskFlow(TaskFlow):
             model = ModelImporter.model('cluster', 'cumulus')
             cluster = model.load(cluster_id, user=user, level=AccessType.ADMIN)
 
-        super(ContainerPullTaskFlow, self).start(
-            start.s(user, cluster, image, container),
+        super(ContainerListTaskFlow, self).start(
+            start.s(user, cluster, container),
             *args, **kwargs)
 
 
-def _get_job_parameters(task, cluster, image, container):
-    repository = image.get('repository')
-    tag = image.get('tag')
-    digest = image.get('digest')
+def _get_job_parameters(task, cluster, container):
     setup_commands = []
     job_parameters = {
         'taskFlowId': task.taskflow.id
@@ -97,26 +95,20 @@ def _get_job_parameters(task, cluster, image, container):
 
     return {
         'container': container,
-        'repository': repository,
-        'tag': tag,
-        'digest': digest,
         'setupCommands': setup_commands,
         'jobParameters': job_parameters
     }
 
 
-def _create_job(task, cluster, folder, image, container):
-    params = _get_job_parameters(task, cluster, image, container)
+def _create_job(task, cluster, folder, container):
+    params = _get_job_parameters(task, cluster, container)
     setup_commands = params['setupCommands']
-    repository = params['repository']
-    tag = params['tag']
     job_parameters = params['jobParameters']
 
-    run_command = 'python pull.py -r %s -t %s -c %s' % (
-        repository, tag, container)
+    run_command = 'python %s -c %s' % (PYTHON_FILE, container)
     commands = setup_commands + [
         run_command,
-        'rm pull.py'
+        'rm %s' % PYTHON_FILE
     ]
 
     body = {
@@ -148,7 +140,7 @@ def _create_job(task, cluster, folder, image, container):
 
 
 @cumulus.taskflow.task
-def start(task, user, cluster, image, container):
+def start(task, user, cluster, container):
     client = create_girder_client(
         task.taskflow.girder_api_url, task.taskflow.girder_token)
 
@@ -161,26 +153,25 @@ def start(task, user, cluster, image, container):
     oc_folder = get_oc_folder(client)
     root_folder = client.createFolder(oc_folder['_id'],
                                       datetime.datetime.now().strftime("%Y_%m_%d-%H_%M_%f"))
-    # temporary folder to save the container in/out description
-    folder = client.createFolder(root_folder['_id'], 'pull_folder')
+    # temporary folder to save the container in/out
+    folder = client.createFolder(root_folder['_id'], 'list_folder')
 
-    # save the pull.py script to the job directory
-    with open(os.path.join(os.path.dirname(__file__), 'utils/pull.py'), 'rb') as f:
+    # save the list.py script to the job directory
+    with open(os.path.join(os.path.dirname(__file__), 'utils/%s' % PYTHON_FILE), 'rb') as f:
         # Get the size of the file
         size = f.seek(0, 2)
         f.seek(0)
-        name = 'pull.py'
-        client.uploadFile(folder['_id'], f, name, size, parentType='folder')
+        client.uploadFile(folder['_id'], f, PYTHON_FILE, size, parentType='folder')
 
-    job = _create_job(task, cluster, folder, image, container)
+    job = _create_job(task, cluster, folder, container)
 
-    # Now download pull.py script to the cluster
-    task.taskflow.logger.info('Preparing job to pull the container.')
+    # Now download list.py script to the cluster
+    task.taskflow.logger.info('Preparing job to list the images.')
     download_job_input_folders(cluster, job,
                                girder_token=task.taskflow.girder_token,
                                submit=False)
 
-    task.taskflow.logger.info('Submitting job to pull the container.')
+    task.taskflow.logger.info('Submitting job to list the images.')
     submit_job(cluster, job, girder_token=task.taskflow.girder_token,
                monitor=False)
 
@@ -188,14 +179,14 @@ def start(task, user, cluster, image, container):
         (cluster, job), {'girder_token': task.taskflow.girder_token,
                          'monitor_interval': 10},
         countdown=countdown(cluster),
-        link=postprocess_job.s(user, cluster, image, job, folder, container))
+        link=postprocess_job.s(user, cluster, job, folder, container))
 
 
 @cumulus.taskflow.task
-def postprocess_job(task, _, user, cluster, image, job, folder, container):
-    task.taskflow.logger.info('Finished pulling the container')
+def postprocess_job(task, _, user, cluster, job, folder, container):
+    task.taskflow.logger.info('Finished listing the images')
 
-    task.taskflow.logger.info('Processing the results of the pull.')
+    task.taskflow.logger.info('Processing the results of the list')
     client = create_girder_client(
         task.taskflow.girder_api_url, task.taskflow.girder_token)
 
@@ -224,44 +215,24 @@ def postprocess_job(task, _, user, cluster, image, job, folder, container):
     # Remove the folder
     client.delete('folder/%s' % folder['_id'])
 
-    pull_json = json.loads(output_io.getvalue().decode('utf-8'))
-    image_uri = pull_json.get('imageUri')
-    # Convert size to GB
-    size = round(pull_json.get('size', 0) / 1.e9, 2)
+    list_json = json.loads(output_io.getvalue().decode('utf-8'))
 
-    _ensure_image_uri_is_valid(task, container, image_uri)
+    for image in list_json:
+        repository = image.get('repository')
+        if repository not in REPOSITORIES_TO_REGISTER:
+            continue
 
-    _post_image_to_database(client, container, image, image_uri, size)
+        tag = image.get('tag')
+        digest = image.get('digest')
+        # Convert size to GB
+        size = round(image.get('size', 0) / 1.e9, 2)
+
+        _post_image_to_database(client, container, repository, tag, digest, size)
 
     task.taskflow.logger.info('Success!')
 
 
-def _ensure_image_uri_is_valid(task, container, image_uri):
-    if not image_uri:
-        log_and_raise(task, 'Image uri is empty')
-
-    # Raises an exception if the uri is not valid
-    if container == 'singularity':
-        if '.sif' not in image_uri:
-            log_and_raise(task, 'Invalid image uri: ' + str(image_uri))
-    else:
-        if ':' not in image_uri:
-            log_and_raise(task, 'Invalid image uri: ' + str(image_uri))
-
-
-def _extract_digest(container, image_uri):
-    if container == 'singularity':
-        # Get the hashsum from the file path
-        return os.path.basename(image_uri).replace('.sif', '')
-    else:
-        return image_uri.split(':')[1]
-
-
-def _post_image_to_database(client, container, image, image_uri, size):
-    repository = image.get('repository')
-    tag = image.get('tag')
-    digest = _extract_digest(container, image_uri)
-
+def _post_image_to_database(client, container, repository, tag, digest, size):
     body = {
         'type': container,
         'repository': repository,

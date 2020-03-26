@@ -2,6 +2,8 @@ import json
 import os
 import re
 
+from girder_client import HttpError
+
 from . import avogadro
 
 
@@ -96,3 +98,28 @@ def get_oc_folder(client):
         oc_folder = client.createFolder(private_folder['_id'], 'oc')
 
     return oc_folder
+
+
+def is_nersc(cluster):
+    return cluster.get('name') in ['cori']
+
+
+def is_demo(cluster):
+    return cluster.get('name') == 'demo_cluster'
+
+
+def countdown(cluster):
+    """
+    Returns the number of seconds the monitoring task should be delayed before
+    running based on the cluster we are using.
+    """
+    countdown = 0
+    # If we are running at NERSC our job states are cached for 60 seconds,
+    # so they are potentially 60 seconds out of date, so we have to wait
+    # at least 60 seconds before we can assume that the job is complete if its
+    # nolonger in the queue, so we delay our monitoring
+    if is_nersc(cluster):
+        countdown = 65
+
+    return countdown
+

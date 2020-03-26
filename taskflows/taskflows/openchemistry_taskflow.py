@@ -9,10 +9,10 @@ from cumulus.tasks.job import submit_job, monitor_job
 from girder.api.rest import getCurrentUser
 from girder.constants import AccessType
 from girder.utility.model_importer import ModelImporter
-from girder_client import HttpError
 
 from .utils import (
-    digest_to_sif, get_cori, get_oc_folder, log_and_raise, log_std_err
+    digest_to_sif, get_cori, get_oc_folder, log_and_raise, log_std_err,
+    is_demo, is_nersc, countdown
 )
 
 from jsonpath_rw import parse
@@ -78,21 +78,6 @@ class OpenChemistryTaskFlow(TaskFlow):
             start.s(input_, user, cluster, image, run_parameters),
             *args, **kwargs)
 
-def _countdown(cluster):
-    """
-    Returns the number of seconds the monitoring task should be delayed before
-    running based on the cluster we are using.
-    """
-    countdown = 0
-    # If we are running at NERSC our job states are cached for 60 seconds,
-    # so they are potentially 60 seconds out of date, so we have to wait
-    # at least 60 seconds before we can assume that the job is complete if its
-    # nolonger in the queue, so we delay our monitoring
-    if _nersc(cluster):
-        countdown = 65
-
-    return countdown
-
 @cumulus.taskflow.task
 def start(task, input_, user, cluster, image, run_parameters):
     """
@@ -130,7 +115,7 @@ def start(task, input_, user, cluster, image, run_parameters):
 
     monitor_job.apply_async((cluster, job), {'girder_token': task.taskflow.girder_token,
                                              'monitor_interval': 10},
-                                             countdown=_countdown(cluster),
+                                             countdown=countdown(cluster),
                             link=postprocess_description.s(input_, user, cluster, image, run_parameters, root_folder, job, description_folder))
 
 def _get_job_parameters(task, cluster, image, run_parameters):
@@ -151,7 +136,7 @@ def _get_job_parameters(task, cluster, image, run_parameters):
 
     # Override default parameters depending on the cluster we are running on
 
-    if _nersc(cluster):
+    if is_nersc(cluster):
         # NERSC specific options
         container = 'shifter' # no root access, only singularity is supported
         job_parameters.update({
@@ -160,7 +145,7 @@ def _get_job_parameters(task, cluster, image, run_parameters):
             'constraint': 'haswell',
             'account': os.environ.get('OC_ACCOUNT')
         })
-    elif _demo(cluster):
+    elif is_demo(cluster):
         # DEV/DEMO environment options
         host_dir = 'dev_job_data'
         job_dir = '{{job._id}}'
@@ -324,7 +309,6 @@ def setup_input(task, input_, cluster, image, run_parameters, root_folder, conta
     input_parameters = input_parameters[0]
 
     input_format = container_description['input']['format']
-    output_format = container_description['output']['format']
 
     # Fetch the starting geometries
     geometry_data = []
@@ -470,7 +454,7 @@ def _create_job(task, input_, cluster, image, run_parameters, container_descript
             mount_option, image_str, container_args
         ))
 
-    if _nersc(cluster):
+    if is_nersc(cluster):
         # NERSC specific options
         job_parameters.update({
             'numberOfNodes': 1,
@@ -502,12 +486,6 @@ def _create_job(task, input_, cluster, image, run_parameters, container_descript
 
     return job
 
-def _nersc(cluster):
-    return cluster.get('name') in ['cori']
-
-def _demo(cluster):
-    return cluster.get('name') == 'demo_cluster'
-
 @cumulus.taskflow.task
 def submit_calculation(task, input_, cluster, image, run_parameters, root_folder, container_description, input_folder, output_folder, scratch_folder, run_folder):
     job = _create_job(task, input_, cluster, image, run_parameters, container_description, input_folder, output_folder, scratch_folder, run_folder)
@@ -528,7 +506,7 @@ def submit_calculation(task, input_, cluster, image, run_parameters, root_folder
 
     monitor_job.apply_async((cluster, job), {'girder_token': girder_token,
                                              'monitor_interval': 10},
-                                             countdown=_countdown(cluster),
+                                             countdown=countdown(cluster),
                             link=postprocess_job.s(input_, cluster, image, run_parameters, root_folder, container_description, input_folder, output_folder, scratch_folder, run_folder, job))
 
 @cumulus.taskflow.task
