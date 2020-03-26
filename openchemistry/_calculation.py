@@ -34,10 +34,20 @@ class GirderMolecule(Molecule):
 
     def calculate(self, image_name, input_parameters, geometry_id=None, run_parameters=None, force=False):
         molecule_id = self._id
-        calculations = _fetch_or_submit_calculations([molecule_id], image_name,
-                                                     input_parameters,
-                                                     [geometry_id],
-                                                     run_parameters, force)
+        try:
+            calculations = _fetch_or_submit_calculations([molecule_id],
+                                                         image_name,
+                                                         input_parameters,
+                                                         [geometry_id],
+                                                         run_parameters, force)
+        except Exception as e:
+            image_not_found_msg = 'Image not found on the server'
+            if e.args and image_not_found_msg in e.args[0]:
+                print(image_not_found_msg)
+                return
+
+            raise
+
         if calculations:
             return _calculation_result(calculations[0], molecule_id)
 
