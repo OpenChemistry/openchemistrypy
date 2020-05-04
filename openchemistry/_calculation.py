@@ -188,7 +188,6 @@ def _submit_calculations(cluster_id, pending_calculation_ids, image_name,
         }
     }
 
-    # Start the taskflow
     body['taskBody'] = {
         'input': {
             'calculations': pending_calculation_ids
@@ -200,11 +199,11 @@ def _submit_calculations(cluster_id, pending_calculation_ids, image_name,
         'runParameters': run_parameters
     }
 
-    params = { 'clusterId': cluster_id } if cluster_id else {}
+    if cluster_id:
+        body['taskBody']['cluster'] = {'_id': cluster_id}
 
     # This returns the taskflow id
-    return GirderClient().post('queues/launchtaskflow', parameters=params,
-                               json=body)
+    return GirderClient().post('launch_taskflow/launch', json=body)
 
 def _fetch_taskflow_status(taskflow_id):
     r = GirderClient().get('taskflows/%s/status' % taskflow_id)
