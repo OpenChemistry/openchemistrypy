@@ -171,27 +171,13 @@ def _nersc():
 
 def _submit_calculations(cluster_id, pending_calculation_ids, image_name,
                          run_parameters):
-    if cluster_id is None and not _nersc():
-        # Try to get demo cluster
-        params = {
-            'type': 'trad'
-        }
-        clusters = GirderClient().get('clusters', params)
-
-        if len(clusters) > 0:
-            cluster_id = clusters[0]['_id']
-        else:
-            raise Exception('Unable to submit calculation, no cluster configured.')
-
     if run_parameters is None:
         run_parameters = {}
 
     repository, tag = parse_image_name(image_name)
 
-    # Create the taskflow
-    queue = fetch_or_create_queue(GirderClient())
-
-    body = {
+    body = {}
+    body['taskFlowBody'] = {
         'taskFlowClass': 'taskflows.OpenChemistryTaskFlow',
         'meta': {
             'calculationIds': pending_calculation_ids,
@@ -202,10 +188,7 @@ def _submit_calculations(cluster_id, pending_calculation_ids, image_name,
         }
     }
 
-    taskflow = GirderClient().post('taskflows', json=body)
-
-    # Start the taskflow
-    body = {
+    body['taskBody'] = {
         'input': {
             'calculations': pending_calculation_ids
         },
@@ -216,19 +199,11 @@ def _submit_calculations(cluster_id, pending_calculation_ids, image_name,
         'runParameters': run_parameters
     }
 
-    if cluster_id is not None:
-        body['cluster'] = {
-            '_id': cluster_id
-        }
-    elif _nersc():
-        body['cluster'] = {
-            'name': 'cori'
-        }
+    if cluster_id:
+        body['taskBody']['cluster'] = {'_id': cluster_id}
 
-    GirderClient().put('queues/%s/add/%s' % (queue['_id'], taskflow['_id']), json=body)
-    GirderClient().put('queues/%s/pop' % queue['_id'], parameters={'multi': True})
-
-    return taskflow['_id']
+    # This returns the taskflow id
+    return GirderClient().post('launch_taskflow/launch', json=body)
 
 def _fetch_taskflow_status(taskflow_id):
     r = GirderClient().get('taskflows/%s/status' % taskflow_id)
