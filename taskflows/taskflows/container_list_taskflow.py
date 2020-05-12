@@ -245,6 +245,5 @@ def _post_image_to_database(client, container, repository, tag, digest, size):
         client.post('images', body)
     except HttpError as e:
         # Just ignore the error if the image already exists
-        error_str = 'Image already exists'
-        if error_str not in e.responseText:
+        if e.status != 409:
             raise
