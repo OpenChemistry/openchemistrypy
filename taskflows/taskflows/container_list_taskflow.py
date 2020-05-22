@@ -13,7 +13,8 @@ from girder.constants import AccessType
 from girder.utility.model_importer import ModelImporter
 
 from .utils import (
-    get_cori, get_oc_folder, log_and_raise, is_demo, is_nersc, countdown
+    get_cori, get_oc_folder, log_and_raise, is_demo, is_nersc, countdown,
+    post_image_to_database
 )
 
 import datetime
@@ -227,23 +228,7 @@ def postprocess_job(task, _, user, cluster, job, folder, container):
         # Convert size to GB
         size = round(image.get('size', 0) / 1.e9, 2)
 
-        _post_image_to_database(client, container, repository, tag, digest, size)
+        post_image_to_database(client, container, repository, tag, digest,
+                               cluster, size)
 
     task.taskflow.logger.info('Success!')
-
-
-def _post_image_to_database(client, container, repository, tag, digest, size):
-    body = {
-        'type': container,
-        'repository': repository,
-        'tag': tag,
-        'digest': digest,
-        'size': size
-    }
-
-    try:
-        client.post('images', body)
-    except HttpError as e:
-        # Just ignore the error if the image already exists
-        if e.status != 409:
-            raise

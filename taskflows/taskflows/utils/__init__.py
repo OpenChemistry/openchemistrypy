@@ -123,3 +123,21 @@ def countdown(cluster):
 
     return countdown
 
+
+def post_image_to_database(client, container, repository, tag, digest, cluster,
+                           size):
+    body = {
+        'type': container,
+        'repository': repository,
+        'tag': tag,
+        'digest': digest,
+        'clusterId': cluster['_id'],
+        'size': size
+    }
+
+    try:
+        client.post('images', body)
+    except HttpError as e:
+        # Just ignore the error if the image already exists
+        if e.status != 409:
+            raise

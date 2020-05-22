@@ -13,7 +13,8 @@ from girder.constants import AccessType
 from girder.utility.model_importer import ModelImporter
 
 from .utils import (
-    get_cori, get_oc_folder, log_and_raise, is_demo, is_nersc, countdown
+    get_cori, get_oc_folder, log_and_raise, is_demo, is_nersc, countdown,
+    post_image_to_database
 )
 
 import datetime
@@ -231,7 +232,12 @@ def postprocess_job(task, _, user, cluster, image, job, folder, container):
 
     _ensure_image_uri_is_valid(task, container, image_uri)
 
-    _post_image_to_database(client, container, image, image_uri, size)
+    repository = image.get('repository')
+    tag = image.get('tag')
+    digest = _extract_digest(container, image_uri)
+
+    post_image_to_database(client, container, repository, tag, digest,
+                           cluster, size)
 
     task.taskflow.logger.info('Success!')
 
@@ -255,24 +261,3 @@ def _extract_digest(container, image_uri):
         return os.path.basename(image_uri).replace('.sif', '')
     else:
         return image_uri.split(':')[1]
-
-
-def _post_image_to_database(client, container, image, image_uri, size):
-    repository = image.get('repository')
-    tag = image.get('tag')
-    digest = _extract_digest(container, image_uri)
-
-    body = {
-        'type': container,
-        'repository': repository,
-        'tag': tag,
-        'digest': digest,
-        'size': size
-    }
-
-    try:
-        client.post('images', body)
-    except HttpError as e:
-        # Just ignore the error if the image already exists
-        if e.status != 409:
-            raise
