@@ -34,10 +34,20 @@ class GirderMolecule(Molecule):
 
     def calculate(self, image_name, input_parameters, geometry_id=None, run_parameters=None, force=False):
         molecule_id = self._id
-        calculations = _fetch_or_submit_calculations([molecule_id], image_name,
-                                                     input_parameters,
-                                                     [geometry_id],
-                                                     run_parameters, force)
+        try:
+            calculations = _fetch_or_submit_calculations([molecule_id],
+                                                         image_name,
+                                                         input_parameters,
+                                                         [geometry_id],
+                                                         run_parameters, force)
+        except Exception as e:
+            image_not_found_msg = 'Image not found on the server'
+            if e.args and image_not_found_msg in e.args[0]:
+                print(image_not_found_msg)
+                return
+
+            raise
+
         if calculations:
             return _calculation_result(calculations[0], molecule_id)
 
@@ -188,7 +198,7 @@ def _submit_calculations(cluster_id, pending_calculation_ids, image_name,
         }
     }
 
-    body['taskBody'] = {
+    body['taskFlowInput'] = {
         'input': {
             'calculations': pending_calculation_ids
         },
@@ -200,7 +210,7 @@ def _submit_calculations(cluster_id, pending_calculation_ids, image_name,
     }
 
     if cluster_id:
-        body['taskBody']['cluster'] = {'_id': cluster_id}
+        body['taskFlowInput']['cluster'] = {'_id': cluster_id}
 
     # This returns the taskflow id
     return GirderClient().post('launch_taskflow/launch', json=body)
@@ -210,8 +220,28 @@ def _fetch_taskflow_status(taskflow_id):
 
     return r['status']
 
+def _ensure_image_on_server(repository, tag, container='docker', digest=None):
+    params = {
+      'repository': repository,
+      'tag': tag
+    }
+
+    if digest is not None:
+        params['digest'] = digest
+
+    r = GirderClient().get('images', params)
+    images = r['results']
+    if len(images) < 1:
+        raise Exception('Image not found on the server')
+
+    if container not in images[0]:
+        raise Exception('Container type not found in image')
+
 def _create_pending_calculation(molecule_id, image_name, input_parameters, geometry_id=None):
     repository, tag = parse_image_name(image_name)
+
+    # Verify that the image is on the server before going any further
+    _ensure_image_on_server(repository, tag)
 
     notebooks = []
     if GirderClient().file is not None:
