@@ -348,17 +348,20 @@ def _calculation_result(calculation, molecule_id):
     return result
 
 def _3d_coords_required(image_name):
-    # We will have a list of programs that require 3D coordinates
-    require_3d_coords_list = [
-        'psi4',
-        'nwchem'
+    # We currently have a whitelist of programs that do not require
+    # 3D coordinates. Assume 3D coords are required for any other
+    # program.
+    # TODO: make some way for us to be able to get information about
+    # the images here, so we can do this via the description.json file.
+    white_list = [
+        'chemml'
     ]
 
-    for program in require_3d_coords_list:
+    for program in white_list:
         if program in image_name:
-            return True
+            return False
 
-    return False
+    return True
 
 def _mol_has_3d_coords(mol_id):
     mol = GirderClient().get('molecules/%s' % mol_id)
