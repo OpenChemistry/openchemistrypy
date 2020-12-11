@@ -146,7 +146,8 @@ class Vibrations(Visualization):
         if experimental:
             from .api import find_spectra
             identifier = self._provider._molecule_id
-            exp_spec = find_spectra(identifier, stype='IR', source='NIST')
+            theo_intensities = self._provider.vibrations.get("intensities", None)
+            exp_spec = find_spectra(identifier, theo_intensities, stype='IR', source='NIST')
             kwargs['exp_spec'] = exp_spec
 
         return super(Vibrations, self).show(viewer=viewer, spectrum=spectrum,

@@ -184,13 +184,15 @@ def queue():
 
     return _calculation_monitor(taskflow_ids)
 
-def find_spectra(identifier, stype='IR', source='NIST'):
+def find_spectra(identifier, theo_intensities, stype='IR', source='NIST'):
     """Find spectra in source database
 
     Parameters
     ----------
     identifier : str
         Inchi string.
+    theo_intensities : list
+        List of theoretical intensities used to normalize.
     stype : str
         Type of spectrum to query.
     source : str
@@ -211,7 +213,10 @@ def find_spectra(identifier, stype='IR', source='NIST'):
     if spectrum is not None:
         frequencies = [float(w) for w in spectrum['x'][1:-1].split()]
         intensities = [float(i) for i in spectrum['y'][1:-1].split()]
-        max_intensity = max(intensities)
+        if theo_intensities is None:
+            max_intensity = max(intensities)
+        else:
+            max_intensity = max(theo_intensities)
         intensities = [i / max_intensity for i in intensities]
         spectrum = {'intensities': intensities, 'frequencies': frequencies}
 
