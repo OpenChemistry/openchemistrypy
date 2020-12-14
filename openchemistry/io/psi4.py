@@ -1,6 +1,6 @@
 import json
 
-from .utils import _cclib_to_cjson_basis, _cclib_to_cjson_mocoeffs, _cclib_to_cjson_vibdisps
+from .utils import _cclib_to_cjson_basis, _cclib_to_cjson_mocoeffs, _cclib_to_cjson_vibdisps, _cleanup_cclib_cjson
 from .base import BaseReader
 from .constants import EV_TO_J_MOL
 
@@ -16,22 +16,7 @@ class Psi4Reader(BaseReader):
         # Basis, moCoefficients, and normal modes need to be further converted
 
         # Cleanup original cjson
-        if 'orbitals' in cjson['atoms']:
-            del cjson['atoms']['orbitals']
-        if 'properties' in cjson:
-            del cjson['properties']
-        if 'vibrations' in cjson:
-            del cjson['vibrations']
-        if 'optimization' in cjson:
-            del cjson['optimization']
-        if 'diagram' in cjson:
-            del cjson['diagram']
-        if 'inchi' in cjson:
-            del cjson['inchi']
-        if 'inchikey' in cjson:
-            del cjson['inchikey']
-        if 'smiles' in cjson:
-            del cjson['smiles']
+        _cleanup_cclib_cjson(cjson)
 
         # Convert basis set info
         if hasattr(data, 'gbasis'):
@@ -42,7 +27,7 @@ class Psi4Reader(BaseReader):
         if hasattr(data, 'mocoeffs'):
             mocoeffs = _cclib_to_cjson_mocoeffs(data.mocoeffs)
             cjson.setdefault('orbitals', {})['moCoefficients'] = mocoeffs
-        
+
         # Convert mo energies
         if hasattr(data, 'moenergies'):
             moenergies = list(data.moenergies[-1])
@@ -50,7 +35,7 @@ class Psi4Reader(BaseReader):
 
         if hasattr(data, 'nelectrons'):
             cjson.setdefault('orbitals', {})['electronCount'] = int(data.nelectrons)
-        
+
         if hasattr(data, 'homos') and hasattr(data, 'nmo'):
             homos = data.homos
             nmo = data.nmo

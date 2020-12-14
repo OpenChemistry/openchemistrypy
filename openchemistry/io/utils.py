@@ -49,3 +49,23 @@ def _cclib_to_cjson_vibdisps(vibdisps):
     for vibdisp in vibdisps:
         cjson_vibdisps.append(list(vibdisp.flatten()))
     return cjson_vibdisps
+
+def _cleanup_cclib_cjson(cjson):
+    if 'orbitals' in cjson['atoms']:
+        del cjson['atoms']['orbitals']
+    if 'properties' in cjson:
+        del cjson['properties']
+    if 'vibrations' in cjson:
+        del cjson['vibrations']
+    if 'optimization' in cjson:
+        del cjson['optimization']
+    if 'diagram' in cjson:
+        del cjson['diagram']
+    if 'inchi' in cjson:
+        del cjson['inchi']
+    if 'inchikey' in cjson:
+        del cjson['inchikey']
+    if 'smiles' in cjson:
+        del cjson['smiles']
+
+    return cjson
