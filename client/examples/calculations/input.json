@@ -1,6 +1,6 @@
 {
   "molecule_id": "5d8611625930286c9c3d087f",
-  "image_name": "openchemistry/psi4:latest",
+  "image_name": "openchemistry/psi4:1.2.1",
   "input_parameters": {
     "task": "energy",
     "theory": "dft",
