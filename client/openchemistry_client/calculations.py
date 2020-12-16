@@ -57,7 +57,8 @@ def _submit(gc, input_file):
 
 @calculations.command('download')
 @click.argument('calculation_id')
-@click.argument('output_file')
+@click.option('-o', '--output-file', default='oc_calculation.json',
+              help='The file to place the output cjson into.')
 @click.pass_obj
 def _download(gc, calculation_id, output_file):
     calcs = gc.get('/calculations/%s' % calculation_id)
