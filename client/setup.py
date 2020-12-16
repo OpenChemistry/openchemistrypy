@@ -32,8 +32,7 @@ setup(
     install_requires=install_reqs,
     entry_points={
         'console_scripts': [
-            'openchemistry-cli = openchemistry_client.client:main',
-            'openchemistry-client = openchemistry_client.client:main'
+            'occlient = openchemistry_client.client:main'
         ]
     }
 )
