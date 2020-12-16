@@ -12,8 +12,8 @@ VERSION = '0.0.1'
               help='RESTful API URL '
                    '(e.g https://girder.example.com:443/%s)' %
                    GirderClient.DEFAULT_API_ROOT)
-@click.option('--api-key', envvar='GIRDER_API_KEY', default=None,
-              help='[default: GIRDER_API_KEY env. variable]')
+@click.option('--api-key', envvar='OPENCHEMISTRY_API_KEY', default=None,
+              help='[default: OPENCHEMISTRY_API_KEY env. variable]')
 @click.version_option(version=VERSION,
                       prog_name='Openchemistry command line interface')
 @click.pass_context
