@@ -37,10 +37,20 @@ class GirderMolecule(Molecule):
 
     def calculate(self, image_name, input_parameters, geometry_id=None, run_parameters=None, force=False):
         molecule_id = self._id
-        calculations = _fetch_or_submit_calculations([molecule_id], image_name,
-                                                     input_parameters,
-                                                     [geometry_id],
-                                                     run_parameters, force)
+        try:
+            calculations = _fetch_or_submit_calculations([molecule_id],
+                                                         image_name,
+                                                         input_parameters,
+                                                         [geometry_id],
+                                                         run_parameters, force)
+        except Exception as e:
+            image_not_found_msg = 'Image not found on the server'
+            if e.args and image_not_found_msg in e.args[0]:
+                print(image_not_found_msg)
+                return
+
+            raise
+
         if calculations:
             return _calculation_result(calculations[0], molecule_id)
 
@@ -177,27 +187,13 @@ def _nersc():
 
 def _submit_calculations(cluster_id, pending_calculation_ids, image_name,
                          run_parameters):
-    if cluster_id is None and not _nersc():
-        # Try to get demo cluster
-        params = {
-            'type': 'trad'
-        }
-        clusters = GirderClient().get('clusters', params)
-
-        if len(clusters) > 0:
-            cluster_id = clusters[0]['_id']
-        else:
-            raise Exception('Unable to submit calculation, no cluster configured.')
-
     if run_parameters is None:
         run_parameters = {}
 
     repository, tag = parse_image_name(image_name)
 
-    # Create the taskflow
-    queue = fetch_or_create_queue(GirderClient())
-
-    body = {
+    body = {}
+    body['taskFlowBody'] = {
         'taskFlowClass': 'taskflows.OpenChemistryTaskFlow',
         'meta': {
             'calculationIds': pending_calculation_ids,
@@ -208,10 +204,7 @@ def _submit_calculations(cluster_id, pending_calculation_ids, image_name,
         }
     }
 
-    taskflow = GirderClient().post('taskflows', json=body)
-
-    # Start the taskflow
-    body = {
+    body['taskFlowInput'] = {
         'input': {
             'calculations': pending_calculation_ids
         },
@@ -222,27 +215,39 @@ def _submit_calculations(cluster_id, pending_calculation_ids, image_name,
         'runParameters': run_parameters
     }
 
-    if cluster_id is not None:
-        body['cluster'] = {
-            '_id': cluster_id
-        }
-    elif _nersc():
-        body['cluster'] = {
-            'name': 'cori'
-        }
+    if cluster_id:
+        body['taskFlowInput']['cluster'] = {'_id': cluster_id}
 
-    GirderClient().put('queues/%s/add/%s' % (queue['_id'], taskflow['_id']), json=body)
-    GirderClient().put('queues/%s/pop' % queue['_id'], parameters={'multi': True})
-
-    return taskflow['_id']
+    # This returns the taskflow id
+    return GirderClient().post('launch_taskflow/launch', json=body)
 
 def _fetch_taskflow_status(taskflow_id):
     r = GirderClient().get('taskflows/%s/status' % taskflow_id)
 
     return r['status']
 
+def _ensure_image_on_server(repository, tag, container='docker', digest=None):
+    params = {
+      'repository': repository,
+      'tag': tag
+    }
+
+    if digest is not None:
+        params['digest'] = digest
+
+    r = GirderClient().get('images', params)
+    images = r['results']
+    if len(images) < 1:
+        raise Exception('Image not found on the server')
+
+    if container not in images[0]:
+        raise Exception('Container type not found in image')
+
 def _create_pending_calculation(molecule_id, image_name, input_parameters, geometry_id=None):
     repository, tag = parse_image_name(image_name)
+
+    # Verify that the image is on the server before going any further
+    _ensure_image_on_server(repository, tag)
 
     notebooks = []
     if JupyterHub().file is not None:
@@ -349,17 +354,20 @@ def _calculation_result(calculation, molecule_id):
     return result
 
 def _3d_coords_required(image_name):
-    # We will have a list of programs that require 3D coordinates
-    require_3d_coords_list = [
-        'psi4',
-        'nwchem'
+    # We currently have a whitelist of programs that do not require
+    # 3D coordinates. Assume 3D coords are required for any other
+    # program.
+    # TODO: make some way for us to be able to get information about
+    # the images here, so we can do this via the description.json file.
+    white_list = [
+        'chemml'
     ]
 
-    for program in require_3d_coords_list:
+    for program in white_list:
         if program in image_name:
-            return True
+            return False
 
-    return False
+    return True
 
 def _mol_has_3d_coords(mol_id):
     mol = GirderClient().get('molecules/%s' % mol_id)

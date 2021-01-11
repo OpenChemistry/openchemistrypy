@@ -184,13 +184,15 @@ def queue():
 
     return _calculation_monitor(taskflow_ids)
 
-def find_spectra(identifier, stype='IR', source='NIST'):
+def find_spectra(identifier, theo_intensities, stype='IR', source='NIST'):
     """Find spectra in source database
 
     Parameters
     ----------
     identifier : str
         Inchi string.
+    theo_intensities : list
+        List of theoretical intensities used to normalize.
     stype : str
         Type of spectrum to query.
     source : str
@@ -211,7 +213,10 @@ def find_spectra(identifier, stype='IR', source='NIST'):
     if spectrum is not None:
         frequencies = [float(w) for w in spectrum['x'][1:-1].split()]
         intensities = [float(i) for i in spectrum['y'][1:-1].split()]
-        max_intensity = max(intensities)
+        if theo_intensities is None:
+            max_intensity = max(intensities)
+        else:
+            max_intensity = max(theo_intensities)
         intensities = [i / max_intensity for i in intensities]
         spectrum = {'intensities': intensities, 'frequencies': frequencies}
 
@@ -236,12 +241,19 @@ def run_calculations(girder_molecules, image_name, input_parameters,
         The input parameters for the taskflow
     input_geometries: list of str
         The input geometries of the molecules
-    run_paramters : dict
+    run_parameters : dict
         The run parameters for the taskflow
     force : bool
         Force all of the calculations to be performed, even if they
         have already been run once.
     """
+    if (not isinstance(input_parameters, dict) or
+            'task' not in input_parameters):
+        print('Warning: no task was specified in "input_parameters"',
+              'for oc.run_calculations().')
+        print('The default task for the image (usually "energy") will be',
+              'performed.')
+
     molecule_ids = [x._id for x in girder_molecules]
     calculations = _fetch_or_submit_calculations(molecule_ids, image_name,
                                                  input_parameters,

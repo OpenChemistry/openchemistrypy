@@ -5,6 +5,8 @@ import json
 import hashlib
 
 import avogadro
+import rmsd
+import numpy as np
 
 from jsonpath_rw import parse
 from IPython.lib import kernel
@@ -155,3 +157,51 @@ def get_oc_token_obj():
         return json.loads(obj_str)
     except (TypeError, json.JSONDecodeError, Exception):
         return {}
+
+def calculate_rmsd(mol_id, geometry_id1=None, geometry_id2=None,
+                   heavy_atoms_only=False):
+
+    # These cause circular import errors if we put them at the top of the file
+    from ._girder import GirderClient
+    from ._calculation import GirderMolecule
+
+    # Allow the user to pass in a GirderMolecule instead of an id
+    if isinstance(mol_id, GirderMolecule):
+        mol_id = mol_id._id
+
+    if geometry_id1 is None:
+        cjson1 = GirderClient().get('/molecules/%s/cjson' % mol_id)
+    else:
+        cjson1 = GirderClient().get('/molecules/%s/geometries/%s/cjson' %
+                                    (mol_id, geometry_id1))
+
+    if geometry_id2 is None:
+        cjson2 = GirderClient().get('/molecules/%s/cjson' % mol_id)
+    else:
+        cjson2 = GirderClient().get('/molecules/%s/geometries/%s/cjson' %
+                                    (mol_id, geometry_id2))
+
+    coords1 = cjson1['atoms']['coords']['3d']
+    coords1_triplets = zip(coords1[0::3], coords1[1::3], coords1[2::3])
+    A = np.array([x for x in coords1_triplets])
+
+    coords2 = cjson2['atoms']['coords']['3d']
+    coords2_triplets = zip(coords2[0::3], coords2[1::3], coords2[2::3])
+    B = np.array([x for x in coords2_triplets])
+
+    if heavy_atoms_only:
+        atomic_numbers = cjson1['atoms']['elements']['number']
+        heavy_indices = [i for i, n in enumerate(atomic_numbers) if n != 1]
+
+        A = A.take(heavy_indices, 0)
+        B = B.take(heavy_indices, 0)
+
+    # Translate
+    A -= rmsd.centroid(A)
+    B -= rmsd.centroid(B)
+
+    # Rotate
+    U = rmsd.kabsch(A, B)
+    A = np.dot(A, U)
+
+    return rmsd.rmsd(A, B)

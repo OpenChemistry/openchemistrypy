@@ -123,7 +123,8 @@ class Structure(Visualization):
 
     def generate_3d(self, forcefield='mmff94', steps=100):
         if cjson_has_3d_coords(self._provider.cjson):
-            raise Exception('Molecule already has 3D coordinates')
+            print('Molecule already has 3D coordinates')
+            return
 
         id = self._provider._id
         params = {
@@ -145,7 +146,8 @@ class Vibrations(Visualization):
         if experimental:
             from .api import find_spectra
             identifier = self._provider._molecule_id
-            exp_spec = find_spectra(identifier, stype='IR', source='NIST')
+            theo_intensities = self._provider.vibrations.get("intensities", None)
+            exp_spec = find_spectra(identifier, theo_intensities, stype='IR', source='NIST')
             kwargs['exp_spec'] = exp_spec
 
         return super(Vibrations, self).show(viewer=viewer, spectrum=spectrum,
