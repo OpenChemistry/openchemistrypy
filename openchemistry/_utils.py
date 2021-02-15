@@ -150,6 +150,14 @@ def mol_has_3d_coords(mol):
     # This functions properly if passed None
     return cjson_has_3d_coords(mol.get('cjson'))
 
+def get_oc_token_obj():
+    import base64
+    try:
+        obj_str = base64.b64decode(os.environ.get('OC_TOKEN'))
+        return json.loads(obj_str)
+    except (TypeError, json.JSONDecodeError, Exception):
+        return {}
+
 def calculate_rmsd(mol_id, geometry_id1=None, geometry_id2=None,
                    heavy_atoms_only=False):
 

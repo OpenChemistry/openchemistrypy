@@ -8,10 +8,13 @@ import urllib.parse
 from girder_client import HttpError
 
 from ._girder import GirderClient
+from ._jupyterhub import JupyterHub
+from ._cluster import Cluster
 from ._molecule import Molecule
 from ._data import MoleculeProvider, CalculationProvider
 from ._utils import (
-    fetch_or_create_queue, hash_object, parse_image_name, mol_has_3d_coords
+    fetch_or_create_queue, hash_object, parse_image_name, mol_has_3d_coords,
+    get_oc_token_obj
 )
 
 class GirderMolecule(Molecule):
@@ -145,7 +148,7 @@ class PendingCalculationResultWrapper(AttributeInterceptor):
             table = CalculationMonitor({
                 'taskFlowIds': [taskflow_id],
                 'girderToken': GirderClient().token,
-                'girderApiUrl': GirderClient().api_url
+                'girderApiUrl': GirderClient().url
             })
         except ImportError:
             # Outside notebook just print message
@@ -177,7 +180,10 @@ def _fetch_calculation(molecule_id, image_name, input_parameters, geometry_id=No
     return res['results'][0]
 
 def _nersc():
-    return os.environ.get('OC_SITE') == 'NERSC'
+    oc_token_obj = get_oc_token_obj()
+    site = oc_token_obj.get('site')
+    site = os.environ.get('OC_SITE', site)
+    return site == 'NERSC'
 
 def _submit_calculations(cluster_id, pending_calculation_ids, image_name,
                          run_parameters):
@@ -244,8 +250,8 @@ def _create_pending_calculation(molecule_id, image_name, input_parameters, geome
     _ensure_image_on_server(repository, tag)
 
     notebooks = []
-    if GirderClient().file is not None:
-        notebooks.append(GirderClient().file['_id'])
+    if JupyterHub().file is not None:
+        notebooks.append(JupyterHub().file['_id'])
 
     body = {
         'moleculeId': molecule_id,
@@ -300,8 +306,8 @@ def _fetch_or_submit_calculations(molecule_ids, image_name, input_parameters,
         else:
             # If we already have a calculation tag it with this notebooks id
             notebooks = calculation.setdefault('notebooks', [])
-            if GirderClient().file is not None:
-                notebooks.append(GirderClient().file['_id'])
+            if JupyterHub().file is not None:
+                notebooks.append(JupyterHub().file['_id'])
 
             body = {
                 'notebooks': notebooks
@@ -314,7 +320,7 @@ def _fetch_or_submit_calculations(molecule_ids, image_name, input_parameters,
 
     if len(pending_calculations) != 0:
         calc_ids = [x['_id'] for x in pending_calculations]
-        taskflow_id = _submit_calculations(GirderClient().cluster_id, calc_ids,
+        taskflow_id = _submit_calculations(Cluster().id, calc_ids,
                                            image_name, run_parameters)
 
         for i, calculation in enumerate(pending_calculations):

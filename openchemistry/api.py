@@ -80,7 +80,7 @@ def _calculation_monitor(taskflow_ids):
         table = CalculationMonitor({
             'taskFlowIds': taskflow_ids,
             'girderToken': GirderClient().token,
-            'girderApiUrl': GirderClient().api_url
+            'girderApiUrl': GirderClient().url
         })
     except ImportError:
         # Outside notebook just print message
@@ -165,7 +165,7 @@ def monitor(results):
     return _calculation_monitor(taskflow_ids)
 
 def queue():
-    if GirderClient().host is None:
+    if GirderClient().client is None:
         import warnings
         warnings.warn("Cannot displaying pending calculations, the notebook is not running in a Girder environment")
         return

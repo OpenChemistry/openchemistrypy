@@ -5,6 +5,7 @@ import avogadro
 import requests
 
 from ._girder import GirderClient
+from ._application import Application
 from ._utils import calculate_mo
 
 from girder_client import HttpError
@@ -122,7 +123,7 @@ class MoleculeProvider(CjsonProvider):
 
     @property
     def url(self):
-        return '%s/molecules/%s' % (GirderClient().app_url.rstrip('/'), self._id)
+        return '%s/molecules/%s' % (Application().url.rstrip('/'), self._id)
 
 class CalculationProvider(CachedDataProvider):
     def __init__(self, calculation_id, molecule_id):
@@ -161,7 +162,7 @@ class CalculationProvider(CachedDataProvider):
 
     @property
     def url(self):
-        return '%s/calculations/%s' % (GirderClient().app_url.rstrip('/'), self._id)
+        return '%s/calculations/%s' % (Application().url.rstrip('/'), self._id)
 
 class AvogadroProvider(CjsonProvider):
     def __init__(self, molecule):
