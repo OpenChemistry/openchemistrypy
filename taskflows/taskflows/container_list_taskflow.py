@@ -34,7 +34,8 @@ REPOSITORIES_TO_REGISTER = [
     'openchemistry/cp2k',
     'openchemistry/nwchem',
     'openchemistry/psi4',
-    'openchemistry/torchani'
+    'openchemistry/torchani',
+    'openchemistry/qiskit',
 ]
 
 class ContainerListTaskFlow(TaskFlow):
