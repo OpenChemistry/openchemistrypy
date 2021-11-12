@@ -1,5 +1,4 @@
 import os
-import inspect
 import json
 from jsonpath_rw import parse
 import urllib
@@ -14,7 +13,8 @@ from ._molecule import Molecule
 from ._data import MoleculeProvider, CalculationProvider
 from ._utils import (
     fetch_or_create_queue, hash_object, parse_image_name, mol_has_3d_coords,
-    get_oc_token_obj
+    get_oc_token_obj, ensure_image_on_server, ImageNotFound, ContainerNotFound,
+    AttributeInterceptor
 )
 
 class GirderMolecule(Molecule):
@@ -35,21 +35,18 @@ class GirderMolecule(Molecule):
         super(GirderMolecule, self).__init__(MoleculeProvider(cjson, _id))
         self._id = _id
 
-    def calculate(self, image_name, input_parameters, geometry_id=None, run_parameters=None, force=False):
+    def calculate(self, image_name, input_parameters, geometry_id=None, model_id=None, run_parameters=None, force=False):
         molecule_id = self._id
         try:
             calculations = _fetch_or_submit_calculations([molecule_id],
                                                          image_name,
                                                          input_parameters,
                                                          [geometry_id],
+                                                         model_id,
                                                          run_parameters, force)
-        except Exception as e:
-            image_not_found_msg = 'Image not found on the server'
-            if e.args and image_not_found_msg in e.args[0]:
-                print(image_not_found_msg)
-                return
-
-            raise
+        except (ImageNotFound, ContainerNotFound) as e:
+            print(e)
+            return
 
         if calculations:
             return _calculation_result(calculations[0], molecule_id)
@@ -111,32 +108,6 @@ class CalculationResult(Molecule):
     def delete(self):
         return _delete_calculation(self._id)
 
-class AttributeInterceptor(object):
-    def __init__(self, wrapped, value, intercept_func=lambda : True):
-        self._wrapped = wrapped
-        self._value = value
-        self._intercept_func = intercept_func
-
-    def unwrap(self):
-        return self._wrapped
-
-    def __getattr__(self, name):
-        # Use object's implementation to get attributes, otherwise
-        # we will get recursion
-        _wrapped = object.__getattribute__(self, '_wrapped')
-        _value = object.__getattribute__(self, '_value')
-        _intercept_func = object.__getattribute__(self, '_intercept_func')
-
-        attr = object.__getattribute__(_wrapped, name)
-        if _intercept_func():
-            if inspect.ismethod(attr):
-                def pending(*args, **kwargs):
-                    return _value
-                return pending
-            else:
-                return AttributeInterceptor(attr, _value, _intercept_func)
-        else:
-            return attr
 
 class PendingCalculationResultWrapper(AttributeInterceptor):
     def __init__(self, calculation, taskflow_id=None):
@@ -161,13 +132,14 @@ class PendingCalculationResultWrapper(AttributeInterceptor):
         super(PendingCalculationResultWrapper, self).__init__(calculation,
                                                               table, intercept)
 
-def _fetch_calculation(molecule_id, image_name, input_parameters, geometry_id=None):
+def _fetch_calculation(molecule_id, image_name, input_parameters, geometry_id=None, model_id=None):
     repository, tag = parse_image_name(image_name)
     input_params_quoted = urllib.parse.quote(json.dumps(input_parameters))
     parameters = {
         'moleculeId': molecule_id,
         'inputParameters': input_params_quoted,
-        'imageName': '%s:%s' % (repository, tag)
+        'imageName': '%s:%s' % (repository, tag),
+        'modelId': model_id
     }
 
     if geometry_id:
@@ -226,28 +198,11 @@ def _fetch_taskflow_status(taskflow_id):
 
     return r['status']
 
-def _ensure_image_on_server(repository, tag, container='docker', digest=None):
-    params = {
-      'repository': repository,
-      'tag': tag
-    }
-
-    if digest is not None:
-        params['digest'] = digest
-
-    r = GirderClient().get('images', params)
-    images = r['results']
-    if len(images) < 1:
-        raise Exception('Image not found on the server')
-
-    if container not in images[0]:
-        raise Exception('Container type not found in image')
-
-def _create_pending_calculation(molecule_id, image_name, input_parameters, geometry_id=None):
+def _create_pending_calculation(molecule_id, image_name, input_parameters, geometry_id=None, model_id=None):
     repository, tag = parse_image_name(image_name)
 
     # Verify that the image is on the server before going any further
-    _ensure_image_on_server(repository, tag)
+    ensure_image_on_server(repository, tag)
 
     notebooks = []
     if JupyterHub().file is not None:
@@ -273,6 +228,9 @@ def _create_pending_calculation(molecule_id, image_name, input_parameters, geome
     if geometry_id is not None:
         body['geometryId'] = geometry_id
 
+    if model_id is not None:
+        body['modelId'] = model_id
+
     calculation = GirderClient().post('calculations', json=body)
 
     return calculation
@@ -281,7 +239,7 @@ def _delete_calculation(calculation_id):
     GirderClient().delete('calculations/%s' % calculation_id)
 
 def _fetch_or_submit_calculations(molecule_ids, image_name, input_parameters,
-                                  geometry_ids=None, run_parameters=None,
+                                  geometry_ids=None, model_id=None, run_parameters=None,
                                   force=False):
 
     try:
@@ -297,11 +255,11 @@ def _fetch_or_submit_calculations(molecule_ids, image_name, input_parameters,
     pending_calculations = []
     for molecule_id, geometry_id in zip(molecule_ids, geometry_ids):
         calculation = _fetch_calculation(molecule_id, image_name,
-                                         input_parameters, geometry_id)
+                                         input_parameters, geometry_id, model_id)
         if calculation is None or force:
             calculation = _create_pending_calculation(molecule_id, image_name,
                                                       input_parameters,
-                                                      geometry_id)
+                                                      geometry_id, model_id)
             pending_calculations.append(calculation)
         else:
             # If we already have a calculation tag it with this notebooks id
@@ -360,7 +318,8 @@ def _3d_coords_required(image_name):
     # TODO: make some way for us to be able to get information about
     # the images here, so we can do this via the description.json file.
     white_list = [
-        'chemml'
+        'chemml',
+        'chemml_predict'
     ]
 
     for program in white_list:

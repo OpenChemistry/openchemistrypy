@@ -3,6 +3,7 @@ import requests
 import re
 import json
 import hashlib
+import inspect
 
 import avogadro
 import rmsd
@@ -158,6 +159,32 @@ def get_oc_token_obj():
     except (TypeError, json.JSONDecodeError, Exception):
         return {}
 
+class ImageNotFound(Exception):
+    pass
+
+class ContainerNotFound(Exception):
+    pass
+
+def ensure_image_on_server(repository, tag, container='docker', digest=None):
+    # These cause circular import errors if we put them at the top of the file
+    from ._girder import GirderClient
+
+    params = {
+      'repository': repository,
+      'tag': tag
+    }
+
+    if digest is not None:
+        params['digest'] = digest
+
+    r = GirderClient().get('images', params)
+    images = r['results']
+    if len(images) < 1:
+        raise ImageNotFound('Image not found on the server')
+
+    if container not in images[0]:
+        raise ContainerNotFound('Container type not found in image')
+
 def calculate_rmsd(mol_id, geometry_id1=None, geometry_id2=None,
                    heavy_atoms_only=False):
 
@@ -205,3 +232,48 @@ def calculate_rmsd(mol_id, geometry_id1=None, geometry_id2=None,
     A = np.dot(A, U)
 
     return rmsd.rmsd(A, B)
+
+def md_table(obj, title="Calculated Properties", col0="Name", col1="Value"):
+    import math
+    table = f'''### {title}
+| {col0} | {col1} |
+|--------|--------|'''
+
+    for prop, value in obj.items():
+        try:
+            value = float(value)
+        except ValueError:
+            value = math.nan
+        table += '\n| %s | %.2f |' % (
+            camel_to_space(prop),
+            value
+        )
+
+    return table
+
+class AttributeInterceptor(object):
+    def __init__(self, wrapped, value, intercept_func=lambda : True):
+        self._wrapped = wrapped
+        self._value = value
+        self._intercept_func = intercept_func
+
+    def unwrap(self):
+        return self._wrapped
+
+    def __getattr__(self, name):
+        # Use object's implementation to get attributes, otherwise
+        # we will get recursion
+        _wrapped = object.__getattribute__(self, '_wrapped')
+        _value = object.__getattribute__(self, '_value')
+        _intercept_func = object.__getattribute__(self, '_intercept_func')
+
+        attr = object.__getattribute__(_wrapped, name)
+        if _intercept_func():
+            if inspect.ismethod(attr):
+                def pending(*args, **kwargs):
+                    return _value
+                return pending
+            else:
+                return AttributeInterceptor(attr, _value, _intercept_func)
+        else:
+            return attr
