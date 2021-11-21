@@ -28,11 +28,17 @@ class OpenChemistryTaskFlow(TaskFlow):
     """
     {
         "input": {
+            "type": <taskflow type: "calculation" or "model">
             "calculations": [
                 <id of pending calculation #1>
                 <id of pending calculation #2>
                 ...
             ],
+            "trainings": [
+                <id of pending model #1>
+                <id of pending model #2>
+                ...
+            ]
         },
         "cluster": {
             "_id": <id of cluster to run on>
@@ -287,49 +293,69 @@ def setup_input(task, input_, cluster, image, run_parameters, root_folder, conta
     if '_id' not in cluster:
         log_and_raise(task, 'Invalid cluster configurations: %s' % cluster)
 
-    calculation_ids = parse('calculations').find(input_)
-    if not calculation_ids:
-        log_and_raise(task, 'Unable to extract calculation ids.')
+    task_type = input_.get('type', 'calculation')
 
-    calculation_ids = calculation_ids[0].value
-    calculations = [client.get('calculations/%s' % x) for x in calculation_ids]
-    molecule_ids = [x['moleculeId'] for x in calculations]
-    geometry_ids = [x.get('geometryId') for x in calculations]
+    geometry_data = []
+    input_parameters = []
+    model_ids = []
+    input_format = ''
 
-    input_parameters = [x.get('input', {}).get('parameters', {})
-                        for x in calculations]
+    if task_type == 'calculation':
+        calculation_ids = parse('calculations').find(input_)
+        if not calculation_ids:
+            log_and_raise(task, 'Unable to extract calculation ids.')
+
+        calculation_ids = calculation_ids[0].value
+        calculations = [client.get('calculations/%s' % x) for x in calculation_ids]
+        molecule_ids = [x['moleculeId'] for x in calculations]
+        geometry_ids = [x.get('geometryId') for x in calculations]
+        model_ids = [x.get('modelId') for x in calculations]
+
+        input_parameters = [x.get('input', {}).get('parameters', {})
+                            for x in calculations]
+
+        input_format = container_description['input']['format']
+
+        # Fetch the starting geometries
+        for molecule_id, geometry_id in zip(molecule_ids, geometry_ids):
+
+            path = 'molecules/%s/' % molecule_id
+            if geometry_id:
+                # It is preferred to use the geometry if we have it
+                path += 'geometries/%s/' % geometry_id
+
+            path += '%s' % input_format
+
+            r = client.get(path, jsonResp=False)
+
+            if r.status_code != 200:
+                raise Exception('Failed to get molecule in format: ' + input_format)
+
+            if input_format == 'cjson':
+                geometry_data.append(json.dumps(r.json()))
+            else:
+                geometry_data.append(r.content.decode('utf-8'))
+    elif task_type == 'training':
+        training_ids = parse('trainings').find(input_)
+        if not training_ids:
+            log_and_raise(task, 'Unable to extract training ids.')
+
+        training_ids = training_ids[0].value
+        trainings = [client.get('trainings/%s' % x) for x in training_ids]
+        input_parameters = [x.get('input', {}).get('parameters', {})
+                            for x in trainings]
+    else:
+        log_and_raise(task, 'Invalid taskflow type: %s' % task_type)
 
     # For now, we only allow multiple calculations if all of the input
     # parameters are the same. Raise an error if they differ.
     if not all(x == input_parameters[0] for x in input_parameters):
         msg = ('For running multiple calculations, all input parameters must '
-               'currently be identical')
+            'currently be identical')
         log_and_raise(task, msg)
 
     input_parameters = input_parameters[0]
 
-    input_format = container_description['input']['format']
-
-    # Fetch the starting geometries
-    geometry_data = []
-    for molecule_id, geometry_id in zip(molecule_ids, geometry_ids):
-
-        path = 'molecules/%s/' % molecule_id
-        if geometry_id:
-            # It is preferred to use the geometry if we have it
-            path += 'geometries/%s/' % geometry_id
-
-        path += '%s' % input_format
-
-        r = client.get(path, jsonResp=False)
-
-        if r.status_code != 200:
-            raise Exception('Failed to get molecule in format: ' + input_format)
-
-        if input_format == 'cjson':
-            geometry_data.append(json.dumps(r.json()))
-        else:
-            geometry_data.append(r.content.decode('utf-8'))
 
     # The folder where the input geometry and input parameters are
     input_folder = client.createFolder(root_folder['_id'], 'input')
@@ -363,6 +389,34 @@ def setup_input(task, input_, cluster, image, run_parameters, root_folder, conta
                                                     name, size,
                                                     parentType='folder')
 
+    # Copy the models to the input directory
+    for i, model_id in enumerate(model_ids):
+        if model_id is None:
+            continue
+
+        model = client.get('trainings/%s' % model_id)
+        file_id = model['fileId']
+
+        name = 'model_' + str(i + 1) + '.%s' % 'tar'
+
+        params = {
+            'folderId': input_folder['_id'],
+            'name': name
+        }
+
+        item = client.post('item', parameters=params)
+
+        params = {
+            'itemId': item['_id']
+        }
+
+        file = client.post('file/%s/copy' % file_id, parameters=params)
+
+        params = {
+            'name': name
+        }
+        client.put('file/%s' % file['_id'], parameters=params)
+
     submit_calculation.delay(input_, cluster, image, run_parameters, root_folder, container_description, input_folder, output_folder, scratch_folder, run_folder)
 
 def _create_job(task, input_, cluster, image, run_parameters, container_description, input_folder, output_folder, scratch_folder, run_folder):
@@ -377,22 +431,45 @@ def _create_job(task, input_, cluster, image, run_parameters, container_descript
 
     task.taskflow.logger.info('Creating %s job' % repository)
 
-    input_format = container_description['input']['format']
-    output_format = container_description['output']['format']
-
     input_dir = os.path.join(guest_dir, job_dir, 'input')
     output_dir = os.path.join(guest_dir, job_dir, 'output')
     scratch_dir = os.path.join(guest_dir, job_dir, 'scratch')
 
     parameters_filename = os.path.join(input_dir, 'input_parameters.json')
 
-    calculation_ids = parse('calculations').find(input_)[0].value
-
     geometry_filenames = []
     output_filenames = []
-    for i in range(len(calculation_ids)):
-        geometry_filenames.append(os.path.join(input_dir, 'geometry_' + str(i + 1) + '.%s' % input_format))
-        output_filenames.append(os.path.join(output_dir, 'output_' + str(i + 1) + '.%s' % output_format))
+    model_filenames = []
+
+    task_type = input_.get('type', 'calculation')
+
+    container_args = '-p %s -s %s' % (
+        parameters_filename, scratch_dir
+    )
+
+    if task_type == 'calculation':
+        calculation_ids = parse('calculations').find(input_)[0].value
+
+        input_format = container_description['input']['format']
+        output_format = container_description['output']['format']
+
+        for i in range(len(calculation_ids)):
+            geometry_filenames.append(os.path.join(input_dir, 'geometry_' + str(i + 1) + '.%s' % input_format))
+            output_filenames.append(os.path.join(output_dir, 'output_' + str(i + 1) + '.%s' % output_format))
+            model_filenames.append(os.path.join(input_dir, 'model_' + str(i + 1) + '.tar'))
+
+        for g, o, m in zip(geometry_filenames, output_filenames, model_filenames):
+            container_args += ' -g %s -o %s -m %s' % (g, o, m)
+    else:
+        training_ids = parse('trainings').find(input_)[0].value
+
+        output_format = container_description['output']['format']
+
+        for i in range(len(training_ids)):
+            output_filenames.append(os.path.join(output_dir, 'output_' + str(i + 1) + '.%s' % output_format))
+
+        for o in output_filenames:
+            container_args += ' -o %s' % o
 
     output = [
         {
@@ -430,13 +507,6 @@ def _create_job(task, input_, cluster, image, run_parameters, container_descript
     }
 
     mount_option = '%s %s:%s' % (bind_args[container], host_dir, guest_dir)
-
-    container_args = '-p %s -s %s' % (
-        parameters_filename, scratch_dir
-    )
-
-    for g, o in zip(geometry_filenames, output_filenames):
-        container_args += ' -g %s -o %s' % (g, o)
 
     image_str = image.get('repository') + ':' + image.get('tag')
 
@@ -532,10 +602,23 @@ def postprocess_job(task, _, input_, cluster, image, run_parameters, root_folder
         scratch_folder_id = None
 
     # ingest the output of the calculation
-    output_format = container_description['output']['format']
+
+    task_type = input_.get('type', 'calculation')
     output_files = []
+
+    if task_type == 'calculation':
+        ids = input_['calculations']
+        endpoint = 'calculations'
+        params = { 'detectBonds': True }
+    else:
+        ids = input_['trainings']
+        endpoint = 'trainings'
+        params = {}
+
+    output_format = container_description['output']['format']
+
     output_items = list(client.listItem(output_folder['_id']))
-    for i in range(len(input_['calculations'])):
+    for i in range(len(ids)):
         output_file = None
         for item in output_items:
             if item['name'] == 'output_' + str(i + 1) + '.%s' % output_format:
@@ -557,10 +640,6 @@ def postprocess_job(task, _, input_, cluster, image, run_parameters, root_folder
     client.delete('folder/%s' % run_folder['_id'])
 
     # Now call endpoint to ingest result
-    params = {
-        'detectBonds': True
-    }
-
     task.taskflow.logger.info('Uploading the results of the calculation to the database.')
 
     code = task.taskflow.get_metadata('code')
@@ -578,7 +657,7 @@ def postprocess_job(task, _, input_, cluster, image, run_parameters, root_folder
             'code': code
         }
 
-        client.put('calculations/%s' % input_['calculations'][i], parameters=params, json=body)
+        client.put('%s/%s' % (endpoint, ids[i]), parameters=params, json=body)
 
     task.taskflow.logger.log(STATUS_LEVEL, 'Done!')
 
