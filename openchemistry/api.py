@@ -3,14 +3,21 @@ from girder_client import HttpError
 import re
 import avogadro
 
+from ._cluster import Cluster
 from ._girder import GirderClient
 from ._molecule import Molecule
 from ._calculation import (
     GirderMolecule, CalculationResult, AttributeInterceptor,
     _fetch_calculation, _fetch_or_submit_calculations, _calculation_result
 )
+from ._model import (
+    Model, _fetch_model, _create_pending_model, _submit_model, _model_result
+)
 from ._data import CjsonProvider, AvogadroProvider
-from ._utils import fetch_or_create_queue
+from ._utils import (
+    parse_image_name,
+    fetch_or_create_queue, ensure_image_on_server, ImageNotFound, ContainerNotFound
+)
 
 _inchi_key_regex = re.compile("^([0-9A-Z\-]+)$")
 
@@ -139,6 +146,32 @@ def find_structure(identifier=None, image_name=None, input_parameters=None, inpu
         return find_calculation(molecule, image_name, input_parameters, input_geometry)
     else:
         return molecule
+
+def find_model(image_name, input_parameters):
+    model = _fetch_model(image_name, input_parameters)
+    # return Model(model['_id'])
+    return _model_result(model)
+
+def create_model(image_name, input_parameters, run_parameters=None):
+    repository, tag = parse_image_name(image_name)
+
+    # Verify that the image is on the server before going any further
+    try:
+        ensure_image_on_server(repository, tag)
+    except (ImageNotFound, ContainerNotFound) as e:
+        print(e)
+        return
+
+    model = _create_pending_model(image_name, input_parameters)
+    taskflow_id = _submit_model(Cluster().id, model['_id'], image_name, run_parameters)
+
+    # Patch model to include taskflow id
+    props = model['properties']
+    props['taskFlowId'] = taskflow_id
+    pending_model = GirderClient().put(
+        'trainings/%s/properties' % model['_id'], json=props)
+
+    return _model_result(pending_model)
 
 def load(data):
     if isinstance(data, dict):

@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 import urllib.parse
 
 from ._girder import GirderClient
-from ._utils import hash_object, camel_to_space, cjson_has_3d_coords
+from ._utils import hash_object, camel_to_space, cjson_has_3d_coords, md_table
 
 class Visualization(ABC):
     def __init__(self, provider):
@@ -219,7 +219,7 @@ class Properties(Visualization):
         properties = cjson.get('properties', {})
         try:
             from IPython.display import Markdown
-            table = self._md_table(properties)
+            table = md_table(properties, 'Calculated Properties', 'Name', 'Value')
             return Markdown(table)
         except ImportError:
             # Outside notebook print CJSON
@@ -227,24 +227,6 @@ class Properties(Visualization):
 
     def data(self):
         return self._provider.cjson.get('properties', {})
-
-    def _md_table(self, properties):
-        import math
-        table = '''### Calculated Properties
-| Name | Value |
-|------|-------|'''
-
-        for prop, value in properties.items():
-            try:
-                value = float(value)
-            except ValueError:
-                value = math.nan
-            table += '\n| %s | %.2f |' % (
-                camel_to_space(prop),
-                value
-            )
-
-        return table
 
 class Geometries(Visualization):
 
